@@ -1,0 +1,22 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 生成的报告与中间库
+compare_out/
+examples/out/
+*.duckdb
+*.duckdb.wal
+
+# 打包产物
+dist/
+build/
+*.spec
+offline-bundle/

@@ -1,0 +1,23 @@
+# 统一按 LF 存入仓库，避免 Windows/Linux 协作时整文件 diff
+* text=auto eol=lf
+
+# Windows 脚本保留 CRLF（PowerShell / 记事本友好）
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 二进制文件不要做换行转换
+*.xlsx binary
+*.xls  binary
+*.duckdb binary
+*.png  binary
+*.jpg  binary
+*.zip  binary
+*.gz   binary
+
+# 示例数据是测试夹具，必须字节级不变，否则测试 CRLF / GBK 就没有意义了
+examples/*.csv binary
+examples/*.txt binary
+
+# 示例数据的报告是生成物，不算代码
+examples/out/** linguist-generated=true

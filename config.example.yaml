@@ -1,0 +1,117 @@
+# =============================================================================
+# datacompare 配置文件示例
+# 所有项都有默认值，只需要写你要覆盖的部分。
+# 用法： datacompare compare -c config.example.yaml
+# =============================================================================
+
+# ----------------------------- 输入数据集 ---------------------------------
+before:
+  path: examples/before.csv
+  kind: auto            # auto | csv | excel | parquet | json（默认按扩展名判断）
+  encoding: utf-8       # 非 UTF-8（如 gbk / gb18030）会先转码再读
+  delimiter: null       # 留空自动嗅探；自定义分隔符写 "," / ";" / "|" / "\t"
+  quote: '"'
+  escape: null
+  header: true          # 首行是否是表头
+  skip_rows: 0          # 表头之前要跳过的行数
+  sheet: null           # Excel：工作表名或 0 基序号
+  sample_size: -1       # -1 = 全量扫描嗅探（最准）；大文件可设 100000 提速
+  name: ""              # 报告里显示的名字，默认用文件名
+
+after:
+  path: examples/after.csv
+  # 其余同上；两侧可以一个 CSV 一个 Excel
+
+# ----------------------------- 行匹配主键 ---------------------------------
+keys: []                # 留空会自动推断；例：["单据号"] 或 ["门店编码", "业务日期"]
+column_map: {}          # 两侧列名不一致时手工映射：{"金额": "amount"}
+
+key_options:
+  auto_detect: true              # keys 为空时自动找唯一且非空的列
+  trim: true                     # 主键比较前去掉首尾空白
+  case_insensitive: false
+  fullwidth_to_halfwidth: true   # 全角转半角后再比
+  numeric_normalize: false       # true 则 001 / 1 / 1.0 视为同一个主键
+  use_row_index_if_no_key: false # 找不到主键时是否退回「按行号对比」
+  max_dup_examples: 20
+
+# ----------------------------- 比较策略 -----------------------------------
+compare:
+  detect_types: true             # 自动推断数值/日期/文本
+  leading_zero_is_text: true     # 001 这类带前导零的列按文本比（避免 001 == 1）
+  max_digits_for_number: 15      # 整数位数超过此值按文本比（防浮点丢精度）
+
+  numeric:
+    rel_tol: 1.0e-9        # 相对容差。1.50 vs 1.5 无需容差，这个值用于吸收浮点噪声
+    abs_tol: 0.0           # 绝对容差。例：金额允许 0.01 的误差就写 0.01
+    ignore_thousands_separator: true   # 1,234.00 与 1234 视为同一个数
+    decimal_separator: "."             # 欧洲写法（1.234,56）改成 ","
+    percent_mode: keep                 # keep=去掉 % 比数值；ratio=12% 视作 0.12
+    strip_currency: true               # 去掉 ¥ $ € £ 等货币符号
+
+  string:
+    trim: true                 # 去首尾空白
+    collapse_whitespace: true  # 把连续空白折叠成一个空格
+    ignore_whitespace: false   # true 则完全忽略空白
+    case_insensitive: false    # true 则忽略大小写
+    fullwidth_to_halfwidth: true
+    null_equals_empty: true    # 空字符串等价于 NULL
+    null_tokens: ["", "null", "none", "nan", "na", "n/a", "-", "--", "无", "空"]
+
+  date:
+    enabled: true
+    day_first: true            # 01/02/2024 按「日/月/年」解析
+    granularity: auto          # auto | timestamp | minute | date
+    tolerance_seconds: 0       # 允许的时间差（秒）
+    formats: []                # 留空用内置格式表，也可以自定义
+
+# ----------------------------- 单列覆盖规则 -------------------------------
+# 用于个别字段的特殊处理，优先级高于全局配置
+columns: []
+# columns:
+#   - name: 金额                 # 前数据集的列名
+#     type: numeric              # string | numeric | date | boolean | ignore
+#     abs_tol: 0.01
+#   - name: 客户手机号
+#     type: string               # 强制按文本比，保留前导零和精度
+#   - name: 备注
+#     ignore: true               # 不参与对比
+#   - name: 身份证号
+#     mask: true                 # 报告里脱敏显示
+#   - name: 旧列名
+#     after_name: 新列名          # 两侧列名不同的映射
+
+# ----------------------------- 异常检测 -----------------------------------
+anomaly:
+  enabled: true
+  outlier_enabled: true
+  outlier_multiplier: 3.0            # IQR 倍数，越小越敏感
+  null_rate_delta: 0.05              # 空值率变化超过 5% 就提示
+  mean_shift_ratio: 0.30             # 均值漂移超过 30% 就提示
+  distinct_change_ratio: 0.30        # 取值个数变化超过 30% 就提示
+  category_max_distinct: 60          # 低基数字段做取值域对比的上限
+  category_max_examples: 10
+  numeric_parse_failure_ratio: 0.02
+  max_examples: 20
+
+# ----------------------------- 报告 ---------------------------------------
+report:
+  title: 前后数据集对比报告
+  formats: [console, html, excel, markdown]   # 也可加 csv
+  top_n: 30                 # 控制台/Markdown 展示的差异条数
+  html_max_rows: 20000      # HTML 内嵌的差异行上限
+  excel_max_rows: 50000     # Excel 明细行数上限（写 Excel 是纯 Python 序列化，行数越多越慢）
+  excel_max_cell_chars: 100 # Excel 单元格截断长度
+  markdown_max_rows: 100
+  only_in_max_rows: 5000    # 单边数据最多导出多少行
+  max_cell_chars: 200       # 单元格展示的最大字符数
+  treat_format_only_as_diff: false   # true 则把「仅格式差异」也当差异
+
+# ----------------------------- 运行环境 -----------------------------------
+output_dir: compare_out
+work_db: null               # 指定后保留 DuckDB 库，可事后写 SQL 复查
+keep_intermediate: true     # 保留中间表（paired / before_match 等）
+memory_limit: 2GB           # DuckDB 内存上限，超出会落磁盘
+threads: null               # null = DuckDB 自动
+temp_dir: null              # DuckDB 溢写目录，大文件建议指向大容量磁盘
+profile_exact_distinct_limit: 2000000   # 行数小于此值时用精确取值个数统计
