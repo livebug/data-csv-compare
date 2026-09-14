@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     一键构建 datacompare 的 Windows 发布物（exe 包 + Python 离线包）。
 
@@ -37,6 +37,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 $Root = Split-Path -Parent $PSScriptRoot
@@ -46,6 +47,23 @@ $VenvDir = Join-Path $Root ".venv-build"
 function Write-Step([string]$Text) {
     Write-Host ""
     Write-Host "==> $Text" -ForegroundColor Cyan
+}
+
+# 外部程序（pip / pyinstaller 等）会把日志写到 stderr，
+# 在 $ErrorActionPreference='Stop' 下会被误判为错误，这里统一兜住。
+function Invoke-Native {
+    param(
+        [Parameter(Mandatory)][string]$Exe,
+        [Parameter(Mandatory)][string[]]$Arguments
+    )
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    & $Exe @Arguments 2>&1 | ForEach-Object { Write-Host "    $_" }
+    $code = $LASTEXITCODE
+    $ErrorActionPreference = $prev
+    if ($code -ne 0) {
+        throw "命令失败（exit $code）：$Exe $($Arguments -join ' ')"
+    }
 }
 
 # ---------- 版本 ----------
@@ -78,7 +96,8 @@ function Resolve-Python {
 
 $py = Resolve-Python -Explicit $PythonExe
 Write-Host "    解释器：$py"
-Write-Host ("    版本  ：" + (& $py -c "import sys; print(sys.version.split()[0])"))
+$pyVer = & $py -c "import sys; print(sys.version.split()[0])" 2>$null
+Write-Host "    版本  ：$pyVer"
 
 $pipArgs = @()
 if ($IndexUrl) { $pipArgs += @("--index-url", $IndexUrl) }
@@ -86,29 +105,33 @@ if ($IndexUrl) { $pipArgs += @("--index-url", $IndexUrl) }
 # ---------- 构建用 venv ----------
 if (-not (Test-Path (Join-Path $VenvDir "Scripts\python.exe"))) {
     Write-Step "创建构建虚拟环境 $VenvDir"
-    & $py -m venv $VenvDir
+    Invoke-Native -Exe $py -Arguments @("-m", "venv", $VenvDir)
 }
 $buildPy = Join-Path $VenvDir "Scripts\python.exe"
 
 Write-Step "安装构建依赖"
-& $buildPy -m pip install --quiet --upgrade pip @pipArgs
-& $buildPy -m pip install --quiet -r (Join-Path $Root "requirements.txt") pyinstaller @pipArgs
-
-New-Item -ItemType Directory -Force -Path $ReleaseDir | Out-Null
+Invoke-Native -Exe $buildPy -Arguments (@("-m", "pip", "install", "--quiet", "--upgrade", "pip") + $pipArgs)
+Invoke-Native -Exe $buildPy -Arguments (@("-m", "pip", "install", "--quiet", "-r", (Join-Path $Root "requirements.txt"), "pyinstaller") + $pipArgs)
 
 # ---------- zip 辅助 ----------
 function Add-FileToZip {
     param($Zip, [string]$Path, [string]$EntryName)
-    [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($Zip, $Path, $EntryName) | Out-Null
+    # PS 5.1 的 CreateEntryFromFile 默认可能不压缩，这里显式指定
+    [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+        $Zip, $Path, $EntryName, [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
 }
 function Add-DirToZip {
     param($Zip, [string]$Dir, [string]$Prefix)
     Get-ChildItem $Dir -Recurse -File | ForEach-Object {
         $rel = $_.FullName.Substring($Dir.Length).TrimStart('\', '/')
-        Add-FileToZip -Zip $Zip -Path $_.FullName -EntryName "$Prefix/$rel"
+        $entry = if ([string]::IsNullOrEmpty($Prefix)) { $rel } else { "$Prefix/$rel" }
+        Add-FileToZip -Zip $Zip -Path $_.FullName -EntryName $entry
     }
 }
-function New-Zip { param([string]$Path)
+function New-Zip {
+    param([string]$Path)
+    $dir = Split-Path -Parent $Path
+    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
     if (Test-Path $Path) { Remove-Item $Path -Force }
     return [System.IO.Compression.ZipFile]::Open($Path, [System.IO.Compression.ZipArchiveMode]::Create)
 }
@@ -116,7 +139,9 @@ function New-Zip { param([string]$Path)
 # ---------- 1. exe 包 ----------
 if (-not $SkipExe) {
     Write-Step "构建 exe（PyInstaller onedir）"
-    & $buildPy (Join-Path $Root "scripts\build_exe.py") --onedir --clean --with-extensions
+    Invoke-Native -Exe $buildPy -Arguments @(
+        (Join-Path $Root "scripts\build_exe.py"), "--onedir", "--clean", "--with-extensions"
+    )
 
     $exeDir = Join-Path $Root "dist\datacompare"
     if (-not (Test-Path $exeDir)) { throw "构建产物不存在：$exeDir" }
@@ -126,7 +151,7 @@ if (-not $SkipExe) {
     $zip = New-Zip $exeZip
     try {
         Add-DirToZip -Zip $zip -Dir $exeDir -Prefix "datacompare"
-        foreach ($doc in @("README.md", "config.example.yaml")) {
+        foreach ($doc in @("README.md", "CHANGELOG.md", "config.example.yaml", "LICENSE")) {
             $p = Join-Path $Root $doc
             if (Test-Path $p) { Add-FileToZip -Zip $zip -Path $p -EntryName $doc }
         }
@@ -143,8 +168,10 @@ if (-not $SkipOffline) {
     if (Test-Path $bundleDir) { Remove-Item $bundleDir -Recurse -Force }
 
     # 用构建 venv（含 duckdb）跑，才能顺带下载 DuckDB 扩展
-    & $buildPy (Join-Path $Root "scripts\build_offline_bundle.py") `
-        --out $bundleDir --python 3.12 --platforms win-x64 --with-extensions
+    Invoke-Native -Exe $buildPy -Arguments @(
+        (Join-Path $Root "scripts\build_offline_bundle.py"),
+        "--out", $bundleDir, "--python", "3.12", "--platforms", "win-x64", "--with-extensions"
+    )
 
     if ($PythonInstaller) {
         if (-not (Test-Path $PythonInstaller)) { throw "Python 安装器不存在：$PythonInstaller" }

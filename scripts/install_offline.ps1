@@ -1,4 +1,4 @@
-# datacompare 离线安装脚本（Windows / PowerShell）
+﻿# datacompare 离线安装脚本（Windows / PowerShell）
 #
 # 在**完全离线**的机器上执行：
 #     powershell -ExecutionPolicy Bypass -File install_offline.ps1
