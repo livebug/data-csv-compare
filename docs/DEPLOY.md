@@ -300,6 +300,29 @@ ldd --version | head -1
 
 ## 八、常见问题
 
+**Q：DuckDB 需要单独安装吗？**
+A：**不需要。** 它就是一个 Python 包，跟着 `pip install` 一起进来，并且自带完整引擎。
+本工具也**不依赖** DuckDB 命令行程序和任何 DuckDB 扩展。
+
+实测确认（Linux）：
+
+```
+$ ldd .venv/lib/python3.13/site-packages/_duckdb.cpython-313-x86_64-linux-gnu.so
+    libdl.so.2 / libpthread.so.0 / libstdc++.so.6 / libm.so.6 / libgcc_s.so.1 / libc.so.6
+```
+
+只有系统基础库，**没有 libduckdb 这样的外部依赖**；58MB 的引擎已经静态编译在
+这个 `.so` 里。仓库里也搜不到 `subprocess` / `INSTALL` 调用，所以运行时既不会
+调外部命令，也不会联网下载扩展。
+
+三个概念的区别：
+
+| | 要不要 | 说明 |
+| --- | --- | --- |
+| Python 包 `duckdb` | **要** | 在 `requirements.txt` 里，离线包里也有对应 wheel |
+| DuckDB CLI | 不要 | 只有你自己想手工查库时才需要 |
+| DuckDB 扩展 | 不要 | 本工具用不到；`--with-extensions` 只是给你留个方便 |
+
 **Q：pip 报 `not a supported wheel on this platform`**
 A：wheel 与「Python 版本 + 操作系统 + CPU 架构」三者绑定。
 确认 `--python` 和 `--platforms` 与目标机器一致，重新制作安装包。

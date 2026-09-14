@@ -312,6 +312,19 @@ PYTHONPATH=src .venv/bin/python -m datacompare compare \
 
 ## 十二、常见问题
 
+**Q：需要单独安装 DuckDB 吗？**
+A：**不需要。** `duckdb` 就是一个普通的 Python 包，`pip install duckdb` 装完即可，
+它自带完整的 DuckDB 引擎（Linux 下是 58MB 的 `_duckdb.cpython-*.so`，只依赖 libc /
+libstdc++ 这些系统基础库，没有外部的 `libduckdb` 需要另装）。
+
+需要区分三个概念：
+
+| | 要不要装 | 说明 |
+| --- | --- | --- |
+| **Python 包 `duckdb`** | **要**（已写进 `requirements.txt`） | 自带完整引擎，本工具的全部计算都靠它 |
+| DuckDB CLI（`duckdb` 命令） | 不要 | 工具不调用任何外部进程，纯 Python 进程内使用。只有你想像 `sqlite3` 那样手工查库时才需要另外装一个单文件二进制 |
+| DuckDB 扩展（`excel` / `json` 等） | 不要 | 本工具不依赖任何扩展，Excel 报告走 openpyxl。离线环境如需扩展见 `docs/DEPLOY.md` |
+
 **Q：为什么我的数值列被当成文本比了？**
 A：三种可能——① 列里有带前导零的值（`001`）；② 整数位超过 15 位；
 ③ 多数值都不是数字。用 `datacompare profile -f 文件` 看「可数值化」比例，
