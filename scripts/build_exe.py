@@ -31,6 +31,14 @@ import shutil
 import subprocess
 import sys
 
+# Windows 控制台 / CI 的输出编码可能是 cp1252/GBK 等非 UTF-8，
+# 中文提示会抛 UnicodeEncodeError，这里统一改写成 UTF-8（失败则忽略）。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 
@@ -89,6 +97,21 @@ def main() -> int:
     return 0
 
 
+def _download_extensions() -> None:
+    """用 duckdb 自动下载常用扩展（excel/json）到 ~/.duckdb/extensions。"""
+    try:
+        import duckdb
+    except Exception as exc:  # noqa: BLE001
+        print(f"  跳过扩展下载：无法导入 duckdb（{exc}）")
+        return
+    for name in ("excel", "json"):
+        try:
+            duckdb.install_extension(name)
+            print(f"  已下载扩展：{name}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"  警告：扩展 {name} 下载失败（{exc}）")
+
+
 def _copy_extensions(base: str) -> None:
     """把本机已下载的 DuckDB 扩展拷到 exe 旁边，供离线使用。"""
     import glob
@@ -96,8 +119,12 @@ def _copy_extensions(base: str) -> None:
     ext_root = os.path.join(os.path.expanduser("~"), ".duckdb", "extensions")
     found = glob.glob(os.path.join(ext_root, "**", "*.duckdb_extension"), recursive=True)
     if not found:
-        print("提示：本机 ~/.duckdb/extensions 下没有扩展文件，先用 "
-              "scripts/build_offline_bundle.py --with-extensions 下载")
+        print("本机 ~/.duckdb/extensions 下没有扩展，尝试自动下载 ...")
+        _download_extensions()
+        found = glob.glob(os.path.join(ext_root, "**", "*.duckdb_extension"), recursive=True)
+    if not found:
+        print("提示：仍未找到扩展文件，跳过（可先跑 "
+              "scripts/build_offline_bundle.py --with-extensions 下载）")
         return
     for src in found:
         rel = os.path.relpath(src, ext_root)

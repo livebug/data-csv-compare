@@ -19,6 +19,7 @@ jobs:
     runs-on: windows-latest
     env:
       PYTHON_VERSION: "3.12"
+      PYTHONIOENCODING: "utf-8"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
