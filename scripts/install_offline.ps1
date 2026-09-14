@@ -47,10 +47,32 @@ function Find-Python {
 }
 
 $py = Find-Python -Explicit $PythonExe
+
+# ---------- 1.5 兜底：使用包内自带的 Python 安装器（离线机器没装 Python 时） ----------
 if (-not $py) {
-    Write-Host "错误：找不到 Python 解释器。" -ForegroundColor Red
-    Write-Host "      本方案要求目标机器已装 Python 3.9+。" -ForegroundColor Red
-    Write-Host "      完全没有 Python 请改用 PyInstaller 单文件方案（见 docs\DEPLOY.md 方案 C）。" -ForegroundColor Red
+    $installer = Get-ChildItem $Here -Filter "python-*-amd64.exe" -ErrorAction SilentlyContinue |
+                 Sort-Object Name -Descending | Select-Object -First 1
+    if ($installer) {
+        $target = Join-Path $Here "python"
+        Write-Host "==> 未找到 Python，使用包内自带安装器（$($installer.Name)）静默安装到 $target" -ForegroundColor Yellow
+        $installArgs = @(
+            "/quiet", "InstallAllUsers=0", "PrependPath=0",
+            "Include_venv=1", "Include_pip=1", "Include_test=0", "Include_launcher=0",
+            "TargetDir=$target"
+        )
+        Start-Process -FilePath $installer.FullName -ArgumentList $installArgs -Wait | Out-Null
+        $bundled = Join-Path $target "python.exe"
+        if (Test-Path $bundled) {
+            $py = $bundled
+            Write-Host "    已安装：$bundled" -ForegroundColor Green
+        }
+    }
+}
+
+if (-not $py) {
+    Write-Host "错误：找不到 Python 解释器，且包内没有自带安装器。" -ForegroundColor Red
+    Write-Host "      请改装 Python 3.9+，或用 -PythonExe 指定解释器；" -ForegroundColor Red
+    Write-Host "      也可以改用 PyInstaller 方案（见 docs\DEPLOY.md 方案 C，无需 Python）。" -ForegroundColor Red
     exit 1
 }
 Write-Host "==> 使用解释器：$py"

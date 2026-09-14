@@ -1,0 +1,72 @@
+name: Build Windows Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "版本号（留空则读取 pyproject.toml）"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      PYTHON_VERSION: "3.12"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Read version
+        id: ver
+        shell: pwsh
+        run: |
+          $v = (Select-String -Path pyproject.toml -Pattern '^\s*version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+          if ("${{ github.event.inputs.version }}") { $v = "${{ github.event.inputs.version }}" }
+          Write-Host "version=$v"
+          "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Download bundled Python installer
+        shell: pwsh
+        run: |
+          $url = "https://mirrors.huaweicloud.com/python/3.12.10/python-3.12.10-amd64.exe"
+          Invoke-WebRequest -Uri $url -OutFile "python-3.12.10-amd64.exe"
+          Get-Item "python-3.12.10-amd64.exe" | Select-Object Name, Length
+
+      - name: Build all Windows release artifacts
+        shell: pwsh
+        run: |
+          ./scripts/build_windows_release.ps1 `
+            -Version "${{ steps.ver.outputs.version }}" `
+            -PythonInstaller "./python-3.12.10-amd64.exe"
+
+      - name: Upload artifacts (workflow run)
+        uses: actions/upload-artifact@v4
+        with:
+          name: datacompare-windows-${{ steps.ver.outputs.version }}
+          path: dist/release/*.zip
+
+      - name: Create or update GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ver = "${{ steps.ver.outputs.version }}"
+          $tag = "v$ver"
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --title "v$ver" --notes "Windows 发布包。详细变更见 CHANGELOG.md。"
+          }
+          gh release upload $tag (Get-ChildItem dist/release/*.zip).FullName --clobber
+          gh release view $tag --json assets --jq '.assets[] | "\(.name)  \(.size) bytes"'
