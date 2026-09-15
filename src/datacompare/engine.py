@@ -139,6 +139,91 @@ class CompareEngine:
             self._temp_dir = None
 
     # ------------------------------------------------------------------
+    # 预览（GUI / 交互式场景）
+    # ------------------------------------------------------------------
+    def inspect(self, preview_rows: int = 20000) -> dict:
+        """只做「读前 N 行 + 字段画像 + 主键建议」，不跑完整对比。
+
+        GUI 里要先让用户确认「字段怎么比、用哪个主键」，这一步必须秒回，
+        所以只抽样 ``preview_rows`` 行，不把整个文件读进来。
+        返回的结论是**建议**，正式对比时仍会按全量数据重新判定。
+        """
+        from .sources import load_source
+
+        con = self._open()
+        try:
+            before = load_source(
+                con, self.cfg.before, BEFORE_TABLE, self._ensure_temp_dir(),
+                limit=preview_rows,
+            )
+            after = load_source(
+                con, self.cfg.after, AFTER_TABLE, self._ensure_temp_dir(),
+                limit=preview_rows,
+            )
+            pairs, only_before, only_after, warnings = self._align_columns(
+                before.columns, after.columns
+            )
+            common = [b for b, a, _ in pairs if a]
+
+            keys, strategy, _key_expr, key_warnings = self._resolve_keys(pairs)
+            warnings.extend(key_warnings)
+
+            columns = []
+            after_for = {b: a for b, a, _ in pairs}
+            if common:
+                prof_b = self.profile(BEFORE_TABLE, common)
+                raw_after = self.profile(
+                    AFTER_TABLE, [after_for[b] for b in common]
+                )
+                for bcol, acol, rule in pairs:
+                    if not acol:
+                        columns.append({
+                            "name": bcol, "afterName": "", "type": "",
+                            "mode": "only_before", "nullRate": None,
+                            "distinct": None, "suggest": "",
+                        })
+                        continue
+                    pb = prof_b.get(bcol)
+                    pa = raw_after.get(after_for[bcol])
+                    if rule and (rule.ignore or rule.type == "ignore"):
+                        ctype, note = "string", "按配置忽略"
+                    elif rule and rule.type:
+                        ctype, note = rule.type, "配置指定"
+                    else:
+                        ctype, note = infer_type(pb, pa, self.cfg, rule)
+                    columns.append({
+                        "name": bcol,
+                        "afterName": acol if acol != bcol else "",
+                        "type": ctype,
+                        "mode": "key" if bcol in keys else "compared",
+                        "nullRate": round(pb.null_rate, 4) if pb else None,
+                        "distinct": pb.distinct_vals if pb else None,
+                        "suggest": note,
+                    })
+            for acol in only_after:
+                columns.append({
+                    "name": acol, "afterName": acol, "type": "", "mode": "only_after",
+                    "nullRate": None, "distinct": None, "suggest": "",
+                })
+
+            return {
+                "ok": True,
+                "previewRows": preview_rows,
+                "before": {"path": before.path, "rows": before.row_count,
+                           "cols": before.ncols, "columns": list(before.columns)},
+                "after": {"path": after.path, "rows": after.row_count,
+                          "cols": after.ncols, "columns": list(after.columns)},
+                "keys": list(keys),
+                "keyStrategy": strategy,
+                "onlyBefore": only_before,
+                "onlyAfter": only_after,
+                "columns": columns,
+                "warnings": warnings,
+            }
+        finally:
+            self.close()
+
+    # ------------------------------------------------------------------
     # 主流程
     # ------------------------------------------------------------------
     def run(self) -> CompareResult:

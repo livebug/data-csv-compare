@@ -83,6 +83,14 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--out", "-o", default="datacompare.yaml", help="输出路径")
     r.add_argument("--force", action="store_true", help="覆盖已存在的文件")
 
+    # ---------------- gui ----------------
+    g = sub.add_parser("gui", help="启动本机 Web 界面（适合不熟悉命令行的同事）")
+    g.add_argument("--host", default="127.0.0.1",
+                   help="监听地址，默认仅本机；要让同事访问用 0.0.0.0")
+    g.add_argument("--port", type=int, default=8765, help="端口，0 表示自动选空端口")
+    g.add_argument("--dir", dest="work_dir", help="工作目录（默认当前目录）")
+    _bool_flag(g, "open-browser", True, "启动后自动打开浏览器（默认）", "不自动打开浏览器")
+
     return parser
 
 
@@ -306,6 +314,17 @@ def cmd_init_config(args) -> int:
     return 0
 
 
+def cmd_gui(args) -> int:
+    from .gui import run_gui
+
+    return run_gui(
+        host=args.host,
+        port=args.port,
+        open_browser=bool(args.open_browser),
+        work_dir=args.work_dir,
+    )
+
+
 _CONFIG_HEADER = """# datacompare 配置文件
 # 所有项都有默认值，只写需要覆盖的部分即可。
 #
@@ -332,6 +351,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         "compare": cmd_compare,
         "profile": cmd_profile,
         "init-config": cmd_init_config,
+        "gui": cmd_gui,
     }
     handler = handlers.get(args.command)
     if handler is None:  # pragma: no cover

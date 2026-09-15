@@ -56,18 +56,28 @@ class LoadedSource:
 # --------------------------------------------------------------------------
 # 对外入口
 # --------------------------------------------------------------------------
-def load_source(con, spec: SourceSpec, table: str, temp_dir: Optional[str] = None) -> LoadedSource:
-    """把一侧数据加载成 DuckDB 表（全 VARCHAR + 原始顺序保留）。"""
+def load_source(
+    con,
+    spec: SourceSpec,
+    table: str,
+    temp_dir: Optional[str] = None,
+    limit: Optional[int] = None,
+) -> LoadedSource:
+    """把一侧数据加载成 DuckDB 表（全 VARCHAR + 原始顺序保留）。
+
+    ``limit`` 只读前 N 行，供 GUI 预览 / 字段画像用——
+    避免为了看一眼字段就把几十 GB 的文件整个读进来。
+    """
     if not spec.path:
         raise ValueError("数据源未指定 path")
     kind = spec.resolved_kind()
     if kind == "excel":
-        return _load_excel(con, spec, table, temp_dir)
+        return _load_excel(con, spec, table, temp_dir, limit)
     if kind == "parquet":
-        return _load_parquet(con, spec, table)
+        return _load_parquet(con, spec, table, limit)
     if kind == "json":
-        return _load_json(con, spec, table)
-    return _load_text(con, spec, table, temp_dir)
+        return _load_json(con, spec, table, limit)
+    return _load_text(con, spec, table, temp_dir, limit)
 
 
 ROW_ID = "__row_id"
@@ -108,7 +118,13 @@ def table_row_count(con, table: str) -> int:
 # --------------------------------------------------------------------------
 # 文本 / CSV
 # --------------------------------------------------------------------------
-def _load_text(con, spec: SourceSpec, table: str, temp_dir: Optional[str]) -> LoadedSource:
+def _load_text(
+    con,
+    spec: SourceSpec,
+    table: str,
+    temp_dir: Optional[str],
+    limit: Optional[int] = None,
+) -> LoadedSource:
     temp_paths: List[str] = []
     warnings: List[str] = []
 
@@ -137,10 +153,11 @@ def _load_text(con, spec: SourceSpec, table: str, temp_dir: Optional[str]) -> Lo
         options.append(f"escape={sql_str(spec.escape)}")
 
     opts = ", ".join(options)
+    limit_sql = f" LIMIT {int(limit)}" if limit else ""
     try:
         con.execute(
             f"CREATE OR REPLACE TABLE {quote_ident('__raw_' + table)} AS "
-            f"SELECT * FROM read_csv({sql_str(path)}, {opts})"
+            f"SELECT * FROM read_csv({sql_str(path)}, {opts}){limit_sql}"
         )
     except Exception as exc:
         _cleanup_paths(temp_paths)
@@ -214,7 +231,13 @@ def _check_duplicate_headers(columns: Sequence[str], warnings: List[str]) -> Non
 # --------------------------------------------------------------------------
 # Excel
 # --------------------------------------------------------------------------
-def _load_excel(con, spec: SourceSpec, table: str, temp_dir: Optional[str]) -> LoadedSource:
+def _load_excel(
+    con,
+    spec: SourceSpec,
+    table: str,
+    temp_dir: Optional[str],
+    limit: Optional[int] = None,
+) -> LoadedSource:
     if spec.path.lower().endswith(".xls"):
         raise ValueError(
             "不支持老版 .xls 格式，请先另存为 .xlsx 或导出为 CSV"
@@ -252,16 +275,25 @@ def _load_excel(con, spec: SourceSpec, table: str, temp_dir: Optional[str]) -> L
                     warnings.append(
                         f"{os.path.basename(file_path)} 的表头与首个文件不一致，已按列序对齐"
                     )
+                written = 0
+                stop = False
                 for row in rows_iter:
                     writer.writerow(_fit_row(row, len(header)))
+                    written += 1
+                    if limit and written >= limit:
+                        stop = True
+                        break
+                if stop:
+                    break
 
         if not header:
             raise ValueError(f"Excel 文件没有可用数据：{spec.path}")
 
+        limit_sql = f" LIMIT {int(limit)}" if limit else ""
         con.execute(
             f"CREATE OR REPLACE TABLE {quote_ident(table)} AS "
             f"SELECT * FROM read_csv({sql_str(tmp_csv)}, header=true, all_varchar=true, "
-            f"nullstr=[{sql_str(NULL_SENTINEL)}], sample_size=-1)"
+            f"nullstr=[{sql_str(NULL_SENTINEL)}], sample_size=-1){limit_sql}"
         )
     except BaseException:
         _cleanup_paths(temp_paths)
@@ -433,13 +465,15 @@ def _cell_text(value: Any) -> Optional[str]:
 # --------------------------------------------------------------------------
 # Parquet / JSON
 # --------------------------------------------------------------------------
-def _load_parquet(con, spec: SourceSpec, table: str) -> LoadedSource:
+def _load_parquet(
+    con, spec: SourceSpec, table: str, limit: Optional[int] = None
+) -> LoadedSource:
     paths = _expand_glob(spec.path) or [spec.path]
     if len(paths) > 1:
         source = f"read_parquet({sql_str(spec.path)}, union_by_name=true)"
     else:
         source = f"read_parquet({sql_str(paths[0])})"
-    _create_varchar_table(con, source, table)
+    _create_varchar_table(con, source, table, limit)
     return LoadedSource(
         table=table,
         columns=table_columns(con, table),
@@ -449,14 +483,16 @@ def _load_parquet(con, spec: SourceSpec, table: str) -> LoadedSource:
     )
 
 
-def _load_json(con, spec: SourceSpec, table: str) -> LoadedSource:
+def _load_json(
+    con, spec: SourceSpec, table: str, limit: Optional[int] = None
+) -> LoadedSource:
     paths = _expand_glob(spec.path) or [spec.path]
     if len(paths) > 1:
         source = f"read_json_auto({sql_str(spec.path)})"
     else:
         source = f"read_json_auto({sql_str(paths[0])})"
     try:
-        _create_varchar_table(con, source, table)
+        _create_varchar_table(con, source, table, limit)
     except Exception as exc:
         raise RuntimeError(
             f"读取 JSON 失败：{spec.path}\n"
@@ -472,10 +508,16 @@ def _load_json(con, spec: SourceSpec, table: str) -> LoadedSource:
     )
 
 
-def _create_varchar_table(con, source_sql: str, table: str) -> None:
+def _create_varchar_table(
+    con, source_sql: str, table: str, limit: Optional[int] = None
+) -> None:
     """把任意来源统一转成「全 VARCHAR + 带 __row_id」的表。"""
     probe = "__probe_" + table
-    con.execute(f"CREATE OR REPLACE TABLE {quote_ident(probe)} AS SELECT * FROM {source_sql}")
+    limit_sql = f" LIMIT {int(limit)}" if limit else ""
+    con.execute(
+        f"CREATE OR REPLACE TABLE {quote_ident(probe)} AS "
+        f"SELECT * FROM {source_sql}{limit_sql}"
+    )
     try:
         cols = table_columns(con, probe)
         if not cols:

@@ -89,6 +89,34 @@ python -m datacompare profile -f 旧数据.csv
 PYTHONPATH=src python -m datacompare compare -b a.csv -a b.csv -o out
 ```
 
+### 图形界面（不想记参数就用这个）
+
+```bash
+python -m datacompare gui
+# 或安装后：datacompare gui
+```
+
+会自动打开浏览器（默认 `http://127.0.0.1:8765/`），三步走完：
+
+1. **选数据**：点「浏览」挑文件，自动认编码 / 分隔符 / 工作表，可先预览前几十行；
+2. **确认字段与主键**：把两个文件的字段自动对齐，标出「仅左侧有 / 仅右侧有」的列，
+   推断每个字段的类型（数值 / 日期 / 文本）并给主键建议，可手动改；
+3. **跑对比**：实时进度条 + 日志，跑完直接点开 HTML 报告，报告就写在输出目录里。
+
+```bash
+# 端口被占用时换一个；0 = 自动挑空闲端口
+datacompare gui --port 8800
+
+# 让同一个内网里的同事也能访问（注意：无鉴权，只在可信内网用）
+datacompare gui --host 0.0.0.0 --port 8765
+
+# 不自动弹浏览器
+datacompare gui --no-open-browser
+```
+
+界面上填的东西可以点「导出配置」存成 YAML，下次直接用 `-c` 跑，等价于命令行。
+同一个界面一次只跑一个任务；关掉终端（Ctrl+C）服务就停了，不会常驻。
+
 ### 常用参数
 
 | 参数 | 说明 |
@@ -279,6 +307,7 @@ src/datacompare/
 ├── models.py       结果数据模型（状态、统计、异常记录）
 ├── sqlutil.py      SQL 字面量安全拼接
 ├── cli.py          命令行入口
+├── gui.py          本机 Web 图形界面（标准库 http.server，无额外依赖）
 └── report/         控制台 / Markdown / HTML / Excel / CSV 报告
 
 scripts/
@@ -293,6 +322,9 @@ docs/DEPLOY.md                离线内网部署方案（Windows / Linux）
 设计上只有一处关键取舍：**归一化和对比全部在 SQL 里做**。
 这样数据不用搬到 Python，DuckDB 可以对磁盘上的大表流式跑完；
 Python 只负责把规则翻译成 SQL。
+
+图形界面刻意只用标准库的 `http.server`，不引入 Flask/FastAPI 之类依赖，
+这样离线包里不需要多带任何东西；页面是一个内嵌的单文件 HTML，也不需要前端构建。
 
 ---
 
@@ -336,6 +368,12 @@ A：用 `column_map: {前侧列名: 后侧列名}`，或在 `columns` 里写 `af
 **Q：我只想看真正的数据错误，不想被格式差异干扰。**
 A：默认就是这样——`FORMAT_ONLY` 不计入「实质差异」，`consistent` 判定也只算实质差异。
 用 `--fail-on-diff` 时同样只看实质差异。
+
+**Q：图形界面要不要装别的东西？端口冲突怎么办？**
+A：不用装任何东西，就是标准库的 `http.server`，只有一个 Python 进程。
+默认只监听 `127.0.0.1`，别人访问不到。端口冲突就 `--port 0` 让它自己挑一个空闲端口。
+界面上跑的任务和命令行完全一样（同一套引擎、同一套报告），
+「导出配置」导出的 YAML 可以直接用 `datacompare compare -c` 复现。
 
 **Q：数据里有大段文本，报告会不会很大？**
 A：用 `report.max_cell_chars` 截断（默认 200），`html_max_rows` 限制内嵌行数，
