@@ -312,6 +312,8 @@ src/datacompare/
 
 scripts/
 ├── build_offline_bundle.py   制作离线安装包（联网机器上跑）
+├── build_windows_release.ps1 Windows 一键发布（exe 包 + 离线包）
+├── extract_release_notes.py  从 CHANGELOG 抽取 Release 说明（CI 用）
 ├── install_offline.sh        Linux/macOS 离线安装
 ├── install_offline.ps1       Windows 离线安装
 └── build_exe.py              打包成免安装可执行程序

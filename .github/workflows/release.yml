@@ -14,12 +14,38 @@ on:
 permissions:
   contents: write
 
+# 提到工作流级别，test 与 build 两个 job 共用
+env:
+  PYTHON_VERSION: "3.12"
+  PYTHONIOENCODING: "utf-8"
+
 jobs:
+  # 门禁：测试不过就不发版。放 ubuntu-latest 而不是 windows-latest，
+  # 一是快，二是 Linux 上的测试结果在开发机上就能复现，
+  # 不会出现「只挂在自己验证不了的平台」这种没法本地排查的情况。
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pytest
+          pip install -e .
+
+      - name: Run tests
+        run: python -m pytest tests -q
+
   build:
+    needs: test
     runs-on: windows-latest
-    env:
-      PYTHON_VERSION: "3.12"
-      PYTHONIOENCODING: "utf-8"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -37,6 +63,13 @@ jobs:
           if ("${{ github.event.inputs.version }}") { $v = "${{ github.event.inputs.version }}" }
           Write-Host "version=$v"
           "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Extract release notes from CHANGELOG
+        shell: pwsh
+        run: |
+          python scripts/extract_release_notes.py "${{ steps.ver.outputs.version }}" notes.md
+          Write-Host "----- Release notes -----"
+          Get-Content notes.md
 
       - name: Download bundled Python installer
         shell: pwsh
@@ -65,9 +98,13 @@ jobs:
         run: |
           $ver = "${{ steps.ver.outputs.version }}"
           $tag = "v$ver"
+          # notes.md 由上一步从 CHANGELOG.md 抽出，找不到该版本时会写兑底说明
           gh release view $tag *> $null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $tag --title "v$ver" --notes "Windows 发布包。详细变更见 CHANGELOG.md。"
+            gh release create $tag --title "v$ver" --notes-file notes.md
+          } else {
+            # 重跑同一 tag 时同步刷新标题与说明，避免留着旧的
+            gh release edit $tag --title "v$ver" --notes-file notes.md
           }
           gh release upload $tag (Get-ChildItem dist/release/*.zip).FullName --clobber
           gh release view $tag --json assets --jq '.assets[] | "\(.name)  \(.size) bytes"'
