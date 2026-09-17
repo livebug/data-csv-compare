@@ -1,0 +1,20 @@
+# 开发 / 构建依赖（内网二次开发、离线重新打包时用）
+#
+# 只部署运行的话**不需要**这个文件，`requirements.txt` 就够了。
+#
+# 离线安装：
+#     pip install --no-index --find-links wheels/ -r requirements-dev.txt
+
+-r requirements.txt
+
+# 构建后端：离线跑 `pip install -e .` / `pip wheel .` 时，
+# pip 的 build isolation 会去装这两个包；--no-index 下只能从 wheels/ 拿，
+# 所以必须一起打进离线包，否则内网装不了。
+setuptools>=68
+wheel
+
+# 让内网也能 `pip install --upgrade pip`（离线包里带一份 pip wheel）
+pip
+
+# 测试
+pytest>=7.0

@@ -19,7 +19,7 @@
    引擎部分一秒都不会省。
 2. **报告渲染是唯一的 Python 热点**，但已经优化过了（详见下一节），
    而且真实场景（差异不多）只要 0.2s。
-3. 换语言的真实成本：约 2000 行 SQL 生成与配置逻辑要重写、34 个测试要重建，
+3. 换语言的真实成本：约 2000 行 SQL 生成与配置逻辑要重写、51 个测试要重建，
    而收益接近 0。**除非有硬性约束（比如公司禁止 Python 上线），否则不建议。**
 
 > 参考：DuckDB 官方提供 C / C++ / Go / Rust / Java / Node / .NET / R 等绑定，
@@ -44,7 +44,7 @@
 | | 方案 A：离线 wheel 包 | 方案 B：免安装可执行程序 | 方案 C：带 Python 的镜像/基线 |
 | --- | --- | --- | --- |
 | 目标机器要有 Python | 要（3.9+） | **不要** | 要 |
-| 包体积 | ~40MB（单平台） | ~130MB | 视基线而定 |
+| 包体积 | ~40MB（单平台，不带源码） | ~130MB | 视基线而定 |
 | 是否需要编译 | 否 | 否，但在目标系统上打 | 否 |
 | 启动速度 | 快 | 快（目录模式 0.1s） | 快 |
 | 依赖管理 | pip 离线装 | 全静态 | 镜像自带 |
@@ -69,6 +69,9 @@ python scripts/build_offline_bundle.py \
     --zip
 ```
 
+> 这条命令产出的包**默认同时带源码和开发依赖**，内网既能直接部署，
+> 也能在源码上二次开发（见下面「步骤 4」）。只想要最小部署包就加 `--no-source --no-dev`。
+
 参数说明：
 
 | 参数 | 说明 |
@@ -76,16 +79,24 @@ python scripts/build_offline_bundle.py \
 | `--python` | 目标机器的 Python 版本，可多个：`3.11,3.12` |
 | `--platforms` | `linux-x64` / `linux-arm64` / `win-x64` / `win-arm64`，也可直接写 pip 平台标签（如 `manylinux_2_28_x86_64`） |
 | `--with-extensions` | 顺便下载 DuckDB 的 `excel` / `json` 扩展，离线机器可直接用 |
+| `--no-source` | **不带源码**。默认是带的（因为内网经常要二次开发）；只部署就加这个，包体积从约 85MB 降到约 40MB |
+| `--no-dev` | 不带开发/构建依赖（setuptools / wheel / pip / pytest） |
+| `--with-git` | 源码里连 `.git` 一起带（保留提交历史，包会变大） |
 | `--zip` | 打成 `tar.gz` |
 
 产出结构：
 
 ```
 offline-bundle/
-├── README.txt
-├── install_offline.sh          # Linux/macOS 安装
-├── install_offline.ps1         # Windows 安装
+├── README.txt                  # 双份说明：怎么装、怎么二次开发
+├── MANIFEST.txt                # 版本号 / 源码提交号 / 生成时间 / 完整 wheel 清单
+├── install_offline.sh          # Linux/macOS 安装（只部署）
+├── install_offline.ps1         # Windows 安装（只部署）
+├── install_dev_offline.sh      # Linux/macOS 二次开发环境（可编辑安装 + 跑测试）
+├── install_dev_offline.ps1     # Windows 二次开发环境
 ├── wheels/                     # 全部 .whl（多平台混放，pip 自动挑对的那个）
+├── source/                     # 完整源码：src/ tests/ examples/ docs/ scripts/
+│                               # + pyproject.toml + requirements*.txt
 └── duckdb_extensions/          # DuckDB 扩展，目录结构镜像 ~/.duckdb/extensions
     └── v1.5.5/linux_amd64/excel.duckdb_extension
 ```
@@ -93,12 +104,37 @@ offline-bundle/
 > `wheels/` 里可以混放多平台 wheel —— pip 会按当前解释器的标签自动筛选，
 > 不会装错。这也是把多平台放一个目录的原因。
 
+### 步骤 1′：让 GitHub 帮你打包（本地不用联网机器）
+
+不想在本地装 Python / 耗流量下载 wheel，就把打包交给 CI ——
+`.github/workflows/release.yml` 里的 `offline-bundle` 作业跑在 `ubuntu-latest` 上：
+
+- **打标签自动出包**：push `v*` tag 时，除 Windows 两个 zip 之外，
+  额外产出 `datacompare-<ver>-offline-bundle.tar.gz` 并挂到 GitHub Release；
+- **随时手动出包**：Actions → **Build Release** → *Run workflow*，
+  在输入框里填目标 Python 版本与平台（留空就用默认值），跑完在
+  **Artifacts** 里下载 `datacompare-offline-bundle-<ver>`（保留 30 天）。
+
+| 输入 | 默认值 | 说明 |
+| --- | --- | --- |
+| `version` | 空 = 读 `pyproject.toml` | 手动触发时用来命名产物 |
+| `python_versions` | `3.9,3.10,3.11,3.12,3.13` | 逗号分隔，与目标机器的 Python 严格对应 |
+| `platforms` | `linux-x64,win-x64` | `linux-x64` / `linux-arm64` / `win-x64` / `win-arm64`，也可写 pip 平台标签 |
+
+为什么能在一个 Linux runner 上备齐 Windows 的 wheel：
+`pip download --platform win_amd64` 只影响**挑哪个 wheel**，
+不需要真的在 Windows 上跑（PyInstaller 才必须本平台构建）。
+
+> ⚠️ CI 跑的是 `pip download`，**版本号取的是仓库里的源码**（含分支/标签指向的提交）。
+> 如果本地有未提交的改动，CI 打出来的包**不会有那些改动** —— 那种情况就本地跑
+> `build_offline_bundle.py`（它会连未提交的改动一起拷进 `source/`）。
+
 ### 步骤 2：拷进内网并安装
 
 **Linux：**
 
 ```bash
-tar -xzf offline-bundle.tar.gz
+tar -xzf offline-bundle.tar.gz      # CI 产出的名字是 datacompare-<ver>-offline-bundle.tar.gz
 cd offline-bundle
 bash install_offline.sh
 ```
@@ -139,6 +175,54 @@ powershell -ExecutionPolicy Bypass -File install_offline.ps1 `
 ```bash
 pip install -i https://nexus.内网域名/repository/pypi/simple datacompare
 ```
+
+### 步骤 4（可选）：内网要在源码上二次开发
+
+打包时**不用加任何参数**——`--source` 和 `--dev` 默认就是开的，
+所以标准那条制作命令产出的包已经带齐了下面这些东西：
+
+| 需要什么 | 包里对应什么 |
+| --- | --- |
+| 源码 | `source/`（整个工作区快照：`src/` `tests/` `scripts/` `docs/` `examples/` + `pyproject.toml`） |
+| 改完能直接跑 | `install_dev_offline.sh` / `.ps1` 做**可编辑安装**（`pip install -e`），改代码不用重装 |
+| 跑测试 | `pytest` wheel 已在 `wheels/`，`requirements-dev.txt` 里也列了 |
+| 离线重新打 wheel | `setuptools` / `wheel` wheel 已在 `wheels/` ——离线做可编辑安装时 pip 的 build isolation 会去装这两个包，**少一个都装不上** |
+| 能对上版本 | `MANIFEST.txt` 里写了项目版本号 + 源码提交号（含未提交改动时会标出来） |
+
+内网执行：
+
+```bash
+tar -xzf offline-bundle.tar.gz && cd offline-bundle
+bash install_dev_offline.sh              # 建 venv-dev → 离线装依赖 → 可编辑装 source/
+cd source
+../venv-dev/bin/python -m pytest tests -q        # 应全部通过
+../venv-dev/bin/datacompare compare -b 旧.csv -a 新.csv -k 单据号 -o out
+```
+
+Windows：
+
+```powershell
+Expand-Archive offline-bundle.zip -DestinationPath . ; cd offline-bundle
+powershell -ExecutionPolicy Bypass -File install_dev_offline.ps1
+cd source
+..\venv-dev\Scripts\python.exe -m pytest tests -q
+```
+
+几个注意点：
+
+1. **源码是「生成那一刻的工作区」**，不是 `git archive`，所以**未提交的改动也会带进去**
+   （内网常见场景就是「先把改了一半的版本递进去」）。想要 git 历史就加 `--with-git`。
+2. `.venv` / `dist` / `__pycache__` / `*.egg-info` / `compare_out` 这些产物目录不会被带走，
+   内网重新建环境即可。
+3. 内网加了**新的第三方依赖**时，本机联网重跑一次 `build_offline_bundle.py` 才能补齐 wheel，
+   内网是变不出新 wheel 的（如果内网有私有 PyPI，也可以只把新 wheel 传上去）。
+4. 安装脚本全程 `--no-index --find-links wheels`，一次网络请求都不会发；
+   如果发现装得慢或者报连接超时，说明某个命令漏了 `--no-index`。
+
+> Windows 那个 `datacompare-<ver>-offline-win-x64.zip`（含 Python 安装器、目标机器
+> 不用装 Python）现在也带源码了（CI 里传了 `-WithSource`），一样能二次开发，
+> 只是它只覆盖 Python 3.12 + Windows；要全平台全版本就用跨平台的
+> `datacompare-<ver>-offline-bundle.tar.gz`。
 
 ---
 

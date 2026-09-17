@@ -1,4 +1,4 @@
-name: Build Windows Release
+name: Build Release
 
 on:
   push:
@@ -10,14 +10,25 @@ on:
         description: "版本号（留空则读取 pyproject.toml）"
         required: false
         default: ""
+      python_versions:
+        description: "离线包目标 Python 版本（逗号分隔，覆盖 env 默认值）"
+        required: false
+        default: ""
+      platforms:
+        description: "离线包目标平台：linux-x64 / linux-arm64 / win-x64 / win-arm64"
+        required: false
+        default: ""
 
 permissions:
   contents: write
 
-# 提到工作流级别，test 与 build 两个 job 共用
+# 提到工作流级别，各 job 共用
 env:
   PYTHON_VERSION: "3.12"
   PYTHONIOENCODING: "utf-8"
+  # 离线交付包默认覆盖的目标（workflow_dispatch 里可以覆盖）
+  OFFLINE_PYTHON_VERSIONS: "3.9,3.10,3.11,3.12,3.13"
+  OFFLINE_PLATFORMS: "linux-x64,win-x64"
 
 jobs:
   # 门禁：测试不过就不发版。放 ubuntu-latest 而不是 windows-latest，
@@ -81,9 +92,11 @@ jobs:
       - name: Build all Windows release artifacts
         shell: pwsh
         run: |
+          # -WithSource：离线 zip 里同时带源码与开发依赖，内网可直接二次开发
           ./scripts/build_windows_release.ps1 `
             -Version "${{ steps.ver.outputs.version }}" `
-            -PythonInstaller "./python-3.12.10-amd64.exe"
+            -PythonInstaller "./python-3.12.10-amd64.exe" `
+            -WithSource
 
       - name: Upload artifacts (workflow run)
         uses: actions/upload-artifact@v4
@@ -108,3 +121,81 @@ jobs:
           }
           gh release upload $tag (Get-ChildItem dist/release/*.zip).FullName --clobber
           gh release view $tag --json assets --jq '.assets[] | "\(.name)  \(.size) bytes"'
+
+  # 跨平台离线交付包：wheel + 源码（内网直接部署，也能二次开发）。
+  # 放 ubuntu-latest 是因为 `pip download --platform ...` 能一次备齐多平台 wheel，
+  # 不需要真的在 Windows/Linux 上各跑一遍。
+  offline-bundle:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Resolve targets and version
+        id: tgt
+        run: |
+          PYVERS="${{ github.event.inputs.python_versions }}"
+          PLATS="${{ github.event.inputs.platforms }}"
+          if [ -z "$PYVERS" ]; then PYVERS="$OFFLINE_PYTHON_VERSIONS"; fi
+          if [ -z "$PLATS" ]; then PLATS="$OFFLINE_PLATFORMS"; fi
+
+          VER=$(python scripts/build_offline_bundle.py --print-version)
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            VER="${{ github.event.inputs.version }}"
+          fi
+          # 打 tag 触发时以 tag 为准（tag 形如 v0.2.0）
+          case "${GITHUB_REF_NAME:-}" in
+            v*) VER="${GITHUB_REF_NAME#v}" ;;
+          esac
+
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "python=$PYVERS" >> "$GITHUB_OUTPUT"
+          echo "platforms=$PLATS" >> "$GITHUB_OUTPUT"
+          echo "目标：datacompare $VER / Python $PYVERS / $PLATS"
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # 打包脚本要 import duckdb 才会顺手下载 DuckDB 扩展
+          pip install -r requirements.txt
+
+      - name: Build offline bundle (wheels + source)
+        run: |
+          python scripts/build_offline_bundle.py \
+            --out dist/offline-bundle \
+            --python "${{ steps.tgt.outputs.python }}" \
+            --platforms "${{ steps.tgt.outputs.platforms }}" \
+            --with-extensions \
+            --zip
+          mv dist/offline-bundle.tar.gz \
+             "dist/datacompare-${{ steps.tgt.outputs.version }}-offline-bundle.tar.gz"
+          ls -lh dist/*.tar.gz
+
+      - name: Show MANIFEST
+        run: cat dist/offline-bundle/MANIFEST.txt
+
+      - name: Upload artifact (workflow run)
+        uses: actions/upload-artifact@v4
+        with:
+          name: datacompare-offline-bundle-${{ steps.tgt.outputs.version }}
+          path: dist/datacompare-*-offline-bundle.tar.gz
+          retention-days: 30
+
+      - name: Upload asset to GitHub Release
+        # 只在打 tag 时挂到 Release 上；手动触发就只留 workflow artifact
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          # 两个 job 并行跑，Release 可能还没被 windows 那个 job 建出来
+          gh release view "$TAG" >/dev/null 2>&1 || \
+            gh release create "$TAG" --title "$TAG" --generate-notes
+          gh release upload "$TAG" dist/datacompare-*-offline-bundle.tar.gz --clobber
+          gh release view "$TAG" --json assets --jq '.assets[] | "\(.name)  \(.size) bytes"'

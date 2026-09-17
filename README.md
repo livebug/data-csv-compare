@@ -272,7 +272,7 @@ C++ 引擎）。详见 `docs/DEPLOY.md`。
 | | 方案 A：离线 wheel 包 | 方案 B：免安装可执行程序 |
 | --- | --- | --- |
 | 目标机器要有 Python | 要（3.9+） | 不要 |
-| 包体积 | 约 40MB | 约 130MB |
+| 包体积 | 约 40MB（含源码 + 开发依赖约 85MB） | 约 130MB |
 | 制作命令 | `python scripts/build_offline_bundle.py --with-extensions --zip` | `python scripts/build_exe.py --onedir` |
 
 **方案 A**：在能联网的机器上把 wheel 全部下载下来，整包拷进内网，
@@ -282,9 +282,27 @@ C++ 引擎）。详见 `docs/DEPLOY.md`。
 python scripts/build_offline_bundle.py --out dist/offline `
     --python 3.12 --platforms win-x64,linux-x64 --with-extensions --zip
 # 内网机器上：
-bash install_offline.sh            # Linux
-powershell -File install_offline.ps1   # Windows
+bash install_offline.sh            # Linux：装上就能跑
+powershell -File install_offline.ps1   # Windows：同上
 ```
+
+**内网还要二次开发**（改代码、加参数、跑测试）就再多走一步：
+上面这条命令**默认就把源码和开发依赖一起带上了**（`source/` +
+`requirements-dev.txt` 里的 setuptools/wheel/pip/pytest），内网里执行
+
+```bash
+bash install_dev_offline.sh        # 可编辑安装：改 source/ 下的代码立刻生效
+cd source && ../venv-dev/bin/python -m pytest tests -q
+```
+
+包内还带 `MANIFEST.txt`（版本号、源码提交号、wheel 清单、生成时间），
+内网收到包先看一眼就知道是哪一版。只要 wheel 不要源码就加 `--no-source --no-dev`。
+
+**不想本地打包就让 GitHub 打**：Actions → **Build Release** → *Run workflow*，
+填目标 Python 版本（默认 `3.9,3.10,3.11,3.12,3.13`）和平台（默认 `linux-x64,win-x64`），
+跑完在 Artifacts 里下载 `datacompare-offline-bundle-<ver>`；
+打 `v*` tag 发版时会自动把同一个包挂到 GitHub Release 上。
+跨平台 wheel 全部在 Linux runner 上就能备齐，不需要两台机器。
 
 **方案 B**：打包成原生可执行程序，目标机器可以完全没有 Python。
 注意 PyInstaller 不支持交叉编译，要在目标系统上各打一次。
@@ -311,15 +329,22 @@ src/datacompare/
 └── report/         控制台 / Markdown / HTML / Excel / CSV 报告
 
 scripts/
-├── build_offline_bundle.py   制作离线安装包（联网机器上跑）
+├── build_offline_bundle.py   制作离线交付包（wheel + 源码，联网机器上跑）
 ├── build_windows_release.ps1 Windows 一键发布（exe 包 + 离线包）
 ├── extract_release_notes.py  从 CHANGELOG 抽取 Release 说明（CI 用）
-├── install_offline.sh        Linux/macOS 离线安装
-├── install_offline.ps1       Windows 离线安装
+├── install_offline.sh        Linux/macOS 离线安装（只部署）
+├── install_offline.ps1       Windows 离线安装（只部署）
+├── install_dev_offline.sh    Linux/macOS 离线二次开发环境
+├── install_dev_offline.ps1   Windows 离线二次开发环境
 └── build_exe.py              打包成免安装可执行程序
 
 docs/DEPLOY.md                离线内网部署方案（Windows / Linux）
 ```
+
+开发依赖单独放在 `requirements-dev.txt`（含构建后端 setuptools/wheel），
+生产部署只认 `requirements.txt`。离线做可编辑安装时 pip 的 build isolation
+也要联网找 setuptools/wheel，所以这两个必须一起进离线包——`requirements-dev.txt`
+里列了，打包脚本会自动带上。
 
 设计上只有一处关键取舍：**归一化和对比全部在 SQL 里做**。
 这样数据不用搬到 Python，DuckDB 可以对磁盘上的大表流式跑完；

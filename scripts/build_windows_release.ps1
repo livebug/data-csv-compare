@@ -6,7 +6,8 @@
     在联网的 Windows 机器上运行。产出（默认 dist\release\）：
       datacompare-<ver>-windows-x64.zip       解压即用（PyInstaller onedir，无需 Python）
       datacompare-<ver>-offline-win-x64.zip   Python 离线安装包（wheels + DuckDB 扩展，
-                                              传入 -PythonInstaller 时附带 Python 安装器）
+                                              传入 -PythonInstaller 时附带 Python 安装器；
+                                              加 -WithSource 再带源码，供内网二次开发）
 
 .PARAMETER Version
     版本号。默认从 pyproject.toml 的 version 读取。
@@ -21,6 +22,10 @@
 .PARAMETER IndexUrl
     pip 镜像地址，例如 https://pypi.tuna.tsinghua.edu.cn/simple。
 
+.PARAMETER WithSource
+    离线包里连源码和开发依赖一起带（供内网二次开发）。默认不带，
+    只做部署包更小；需要时加这个开关。
+
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File scripts\build_windows_release.ps1 `
         -PythonInstaller C:\downloads\python-3.12.10-amd64.exe `
@@ -33,7 +38,8 @@ param(
     [string]$PythonInstaller = "",
     [string]$IndexUrl = "",
     [switch]$SkipExe,
-    [switch]$SkipOffline
+    [switch]$SkipOffline,
+    [switch]$WithSource
 )
 
 $ErrorActionPreference = "Stop"
@@ -163,15 +169,23 @@ if (-not $SkipExe) {
 
 # ---------- 2. Python 离线包 ----------
 if (-not $SkipOffline) {
-    Write-Step "构建 Python 离线包（wheels + DuckDB 扩展）"
+    if ($WithSource) {
+        Write-Step "构建 Python 离线包（wheels + DuckDB 扩展 + 源码）"
+    } else {
+        Write-Step "构建 Python 离线包（wheels + DuckDB 扩展）"
+    }
     $bundleDir = Join-Path $Root "dist\offline-bundle"
     if (Test-Path $bundleDir) { Remove-Item $bundleDir -Recurse -Force }
 
-    # 用构建 venv（含 duckdb）跑，才能顺带下载 DuckDB 扩展
-    Invoke-Native -Exe $buildPy -Arguments @(
+    # build_offline_bundle.py 默认带源码与开发依赖，发布包按需二选一
+    $bundleArgs = @(
         (Join-Path $Root "scripts\build_offline_bundle.py"),
         "--out", $bundleDir, "--python", "3.12", "--platforms", "win-x64", "--with-extensions"
     )
+    if (-not $WithSource) { $bundleArgs += @("--no-source", "--no-dev") }
+
+    # 用构建 venv（含 duckdb）跑，才能顺带下载 DuckDB 扩展
+    Invoke-Native -Exe $buildPy -Arguments $bundleArgs
 
     if ($PythonInstaller) {
         if (-not (Test-Path $PythonInstaller)) { throw "Python 安装器不存在：$PythonInstaller" }
