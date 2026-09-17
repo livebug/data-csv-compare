@@ -3,6 +3,56 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [0.3.0] - 2026-09-17
+
+本版重点：**离线交付包从「只能跑」升级为「能改」** —— wheel 与源码一起带进内网，
+内网装好就能可编辑安装、跑测试、离线重打 wheel；打包这一步也交给 GitHub Actions 自动完成。
+
+### 新增
+
+- 离线交付包升级为「**wheel + 源码**一起带」，内网可以直接二次开发
+  - `scripts/build_offline_bundle.py` 默认新增 `source/`（当前工作区快照，
+    含未提交改动；`--with-git` 可连 `.git` 历史一起带走）
+  - 新增 `requirements-dev.txt`：`setuptools` / `wheel` / `pip` / `pytest`。
+    离线做 `pip install -e .` 时 pip 的 build isolation 会去装 setuptools 和 wheel，
+    `--no-index` 下这两个必须来自包内，否则内网装不上
+  - 新增 `scripts/install_dev_offline.sh` / `.ps1`：离线建 `venv-dev`、
+    可编辑安装 `source/`、装 DuckDB 扩展、跑 `pytest` 自检
+  - 新增 `MANIFEST.txt`：项目版本号、源码提交号（含未提交改动会标出）、
+    生成时间、目标 Python/平台、完整 wheel 清单
+  - 包内 `README.txt` 重写，分「只部署」与「二次开发」两条路径
+  - `--no-source` / `--no-dev` 可退回到原来只带 wheel 的精简包（约 40MB）
+- `scripts/build_windows_release.ps1` 新增 `-WithSource` 开关
+  （发布包默认仍不带源码，保持体积）
+- **CI 自动产出跨平台离线包**：`.github/workflows/release.yml` 新增 `offline-bundle` 作业
+  - 跑在 `ubuntu-latest`（`pip download --platform` 能在 Linux 上一次备齐 Windows wheel，
+    不需要两个 runner）
+  - 产出 `datacompare-<ver>-offline-bundle.tar.gz`：wheel + 源码 + 开发依赖
+  - push `v*` tag 时自动挂到 GitHub Release；`workflow_dispatch` 可手动触发
+    （新增 `python_versions` / `platforms` 两个输入，留空用默认 `3.9-3.13` / `linux-x64,win-x64`）
+  - Windows 发布流程改为 `-WithSource`，让 `offline-win-x64.zip` 也带源码
+- `build_offline_bundle.py` 新增 `--print-version`（CI 取版本号用，不再在 YAML 里写正则）
+
+### 变更
+
+- GitHub Actions 工作流名 `Build Windows Release` → `Build Release`：现在一个 tag
+  同时产出 Windows 两个 zip 与跨平台离线包（三个作业：`test` 门禁 → `build` 与
+  `offline-bundle` 并行）
+- `datacompare-<ver>-offline-win-x64.zip` 也含源码与开发依赖（CI 传 `-WithSource`），
+  体积增加约 5MB
+
+### 修复
+
+- `build_offline_bundle.py` 重定向/管道输出时进度日志与 pip 输出顺序错位
+- `build_offline_bundle.py` 下载开发依赖时不再按**构建机**平台重复解析运行依赖
+  （以前会多带一份用不上的平台 wheel）
+
+### 文档
+
+- `docs/DEPLOY.md` 方案 A 新增「步骤 1′：让 GitHub 帮你打包」与「步骤 4：内网要在源码上二次开发」
+- `README.md` 离线内网部署章节补充源码/开发依赖与 CI 打包说明
+- 开发依赖单独拆到 `requirements-dev.txt`，生产部署只认 `requirements.txt`
+
 ## [0.2.0] - 2026-09-15
 
 本版重点：**加了一个图形界面**，把「41 个命令行参数 / 69 个配置项」的门槛降下来；
