@@ -18,8 +18,9 @@
     用于构建的 Python 解释器。默认在 PATH 里找 python / py。
 
 .PARAMETER PythonInstaller
-    python-3.12.x-amd64.exe 路径。提供时会放进离线包，让完全没有 Python
-    的离线机器也能一键安装。
+    python-3.13.x-amd64.exe 路径。提供时会放进离线包，让完全没有 Python
+    的离线机器也能一键安装。**版本要跟构建用的 Python 一致**，否则包里
+    的 cp3XX wheel 在那台机器上装不上。
 
 .PARAMETER IndexUrl
     pip 镜像地址，例如 https://pypi.tuna.tsinghua.edu.cn/simple。

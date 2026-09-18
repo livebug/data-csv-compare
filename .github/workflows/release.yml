@@ -22,13 +22,17 @@ on:
 permissions:
   contents: write
 
-# 提到工作流级别，各 job 共用
+# 提到工作流级别，各 job 共用。
+# 用 3.13 而不是 3.12：内网开发环境是 3.13，Windows 产物必须同版本，
+# 否则 exe 包里是 cp312 wheel，在 3.13 机器上会报 not a supported wheel on this platform。
 env:
-  PYTHON_VERSION: "3.12"
+  PYTHON_VERSION: "3.13"
   PYTHONIOENCODING: "utf-8"
   # 离线交付包默认覆盖的目标（workflow_dispatch 里可以覆盖）
   OFFLINE_PYTHON_VERSIONS: "3.13"
   OFFLINE_PLATFORMS: "linux-x64,win-x64"
+  # 随 windows 离线套件一起带的 Python 安装器（给完全没 Python 的机器）
+  PYTHON_INSTALLER: "python-3.13.7-amd64.exe"
 
 jobs:
   # 门禁：测试不过就不发版。放 ubuntu-latest 而不是 windows-latest，
@@ -129,9 +133,10 @@ jobs:
       - name: Download bundled Python installer
         shell: pwsh
         run: |
-          $url = "https://mirrors.huaweicloud.com/python/3.12.10/python-3.12.10-amd64.exe"
-          Invoke-WebRequest -Uri $url -OutFile "python-3.12.10-amd64.exe"
-          Get-Item "python-3.12.10-amd64.exe" | Select-Object Name, Length
+          # 版本要和 PYTHON_VERSION 对得上，否则离线套件里的 wheel 装不上
+          $url = "https://mirrors.huaweicloud.com/python/3.13.7/${{ env.PYTHON_INSTALLER }}"
+          Invoke-WebRequest -Uri $url -OutFile "${{ env.PYTHON_INSTALLER }}"
+          Get-Item "${{ env.PYTHON_INSTALLER }}" | Select-Object Name, Length
 
       - name: Build all Windows release artifacts
         shell: pwsh
@@ -139,7 +144,7 @@ jobs:
           # -WithSource：离线 zip 里同时带源码与开发依赖，内网可直接二次开发
           ./scripts/build_windows_release.ps1 `
             -Version "${{ steps.ver.outputs.version }}" `
-            -PythonInstaller "./python-3.12.10-amd64.exe" `
+            -PythonInstaller "./${{ env.PYTHON_INSTALLER }}" `
             -WithSource
 
       - name: Upload artifacts (workflow run)

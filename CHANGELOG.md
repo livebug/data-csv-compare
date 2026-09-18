@@ -3,20 +3,29 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
-## [未发布]
+## [0.3.2] - 2026-09-18
+
+本版修两个会把内网实施卡住的问题：Windows 产物是按 **Python 3.12** 构建的（而开发环境是 3.13，
+拿过去根本装不上），以及三个产物名字分不清哪个给谁用。
+
+### 修复
+
+- **Windows 产物改用 Python 3.13 构建**：CI 的 `PYTHON_VERSION` 由 3.12 改为 3.13，
+  自带的 Python 安装器换成 `python-3.13.7-amd64.exe`。
+  之前 `windows-x64.zip` 与 `offline-win-x64.zip` 里是 cp312 的 wheel，
+  在 3.13 的机器上会报 `not a supported wheel on this platform`
 
 ### 变更
 
-- **Release 产物改名**，三个包别再让人对着名字猜（旧名混着 offline/windows 两种词序）：
+- **Release 产物改名**，别再让人对着名字猜（旧名混着 offline / windows 两种词序）：
   - `datacompare-<ver>-windows-x64.zip` → `-windows-x64-standalone.zip`（免 Python，解压即用）
-  - `datacompare-<ver>-offline-win-x64.zip` → `-windows-x64-offline-kit.zip`（自带 Python 安装器 + wheels + 源码）
+  - `datacompare-<ver>-offline-win-x64.zip` → `-windows-x64-offline-kit.zip`（自带安装器 + wheels + 源码）
   - `datacompare-<ver>-offline-bundle.tar.gz` → `-wheels-src-py<版本>-<平台>.tar.gz`
     （自备 Python；名字里的 `py313` / `linux-win` 直接说明兼容性与平台）
   - Release 说明自动附上「三个文件怎么选」表格（`docs/RELEASE-ASSETS.md`）
-- 清理死代码（全仓库搜过确认零引用，均可从 git 历史找回）：
-  `SourceSpec.display_name()`、`is_excel_kind`、`Stats._ratio()`、
-  `ColumnResult.diff_rate`、`normalize.normalize_text_py()`、`numeric_clean_expr()`
-  ——最后一个连带删掉只服务它的 `_FW_TABLE`
+- 清理死代码（全仓库搜过确认零引用）：`SourceSpec.display_name()`、`is_excel_kind`、
+  `Stats._ratio()`、`ColumnResult.diff_rate`、`normalize.normalize_text_py()`、
+  `numeric_clean_expr()`；最后一个连带删掉只服务它的 `_FW_TABLE`
 
 ### 文档
 

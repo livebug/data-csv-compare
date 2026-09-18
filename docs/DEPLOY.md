@@ -255,9 +255,9 @@ cd source
 所以离线包里每个开发包**只留一个版本**。改这个列表后跑一下 CI 的 `test-offline`
 作业（在容器里真离线装一遍再跑测试），本地开发机是验证不了这两类问题的。
 
-> Windows 那个 `datacompare-<ver>-windows-x64-offline-kit.zip`（自带 Python 安装器、
+> Windows 那个 `datacompare-<ver>-windows-x64-offline-kit.zip`（自带 Python 3.13 安装器、
 > 目标机器不用装 Python）也带源码（CI 里传了 `-WithSource`），一样能二次开发，
-> 只是它只覆盖 Python 3.12 + Windows；要覆盖多个 Python 版本就用跨平台的
+> 只是它只覆盖 Python 3.13 + Windows；要覆盖多个 Python 版本就用跨平台的
 > `datacompare-<ver>-wheels-src-py<版本>-<平台>.tar.gz`。
 
 ---

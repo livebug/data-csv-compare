@@ -5,7 +5,7 @@
 | 文件 | 目标机 | 要装 Python 吗 | 能改代码吗 |
 | --- | --- | --- | --- |
 | `...-windows-x64-standalone.zip` | Windows | **不要**，解压即用 | 不能 |
-| `...-windows-x64-offline-kit.zip` | Windows | 不要（自带 Python 3.12 安装器） | **能**（含 wheels + 源码） |
+| `...-windows-x64-offline-kit.zip` | Windows | 不要（自带 Python 3.13 安装器） | **能**（含 wheels + 源码） |
 | `...-wheels-src-py<版本>-<平台>.tar.gz` | Linux / Windows | **要**，版本与文件名一致 | **能**（含 wheels + 源码） |
 
 - 名字里的 `py313` / `py312-313` 是**目标机需要自备的 Python 版本**；
