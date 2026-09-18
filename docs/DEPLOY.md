@@ -111,10 +111,13 @@ offline-bundle/
 `.github/workflows/release.yml` 里的 `offline-bundle` 作业跑在 `ubuntu-latest` 上：
 
 - **打标签自动出包**：push `v*` tag 时，除 Windows 两个 zip 之外，
-  额外产出 `datacompare-<ver>-offline-bundle.tar.gz` 并挂到 GitHub Release；
+  额外产出 `datacompare-<ver>-wheels-src-py<版本>-<平台>.tar.gz` 并挂到 GitHub Release；
 - **随时手动出包**：Actions → **Build Release** → *Run workflow*，
   在输入框里填目标 Python 版本与平台（留空就用默认值），跑完在
-  **Artifacts** 里下载 `datacompare-offline-bundle-<ver>`（保留 30 天）。
+  **Artifacts** 里下载 `datacompare-wheels-src-<ver>`（保留 30 天）。
+
+Release 页面的说明里会附一张「三个文件怎么选」的表（内容来自仓库里的
+`docs/RELEASE-ASSETS.md`），不用对着文件名猜。
 
 | 输入 | 默认值 | 说明 |
 | --- | --- | --- |
@@ -135,7 +138,9 @@ offline-bundle/
 **Linux：**
 
 ```bash
-tar -xzf offline-bundle.tar.gz      # CI 产出的名字是 datacompare-<ver>-offline-bundle.tar.gz
+# 本地打出来的叫 offline-bundle.tar.gz；CI 产出的名字形如
+# datacompare-<ver>-wheels-src-py313-linux-win.tar.gz
+tar -xzf offline-bundle.tar.gz
 cd offline-bundle
 bash install_offline.sh
 ```
@@ -250,10 +255,10 @@ cd source
 所以离线包里每个开发包**只留一个版本**。改这个列表后跑一下 CI 的 `test-offline`
 作业（在容器里真离线装一遍再跑测试），本地开发机是验证不了这两类问题的。
 
-> Windows 那个 `datacompare-<ver>-offline-win-x64.zip`（含 Python 安装器、目标机器
-> 不用装 Python）现在也带源码了（CI 里传了 `-WithSource`），一样能二次开发，
-> 只是它只覆盖 Python 3.12 + Windows；要全平台全版本就用跨平台的
-> `datacompare-<ver>-offline-bundle.tar.gz`。
+> Windows 那个 `datacompare-<ver>-windows-x64-offline-kit.zip`（自带 Python 安装器、
+> 目标机器不用装 Python）也带源码（CI 里传了 `-WithSource`），一样能二次开发，
+> 只是它只覆盖 Python 3.12 + Windows；要覆盖多个 Python 版本就用跨平台的
+> `datacompare-<ver>-wheels-src-py<版本>-<平台>.tar.gz`。
 
 ---
 
@@ -323,7 +328,7 @@ tar -tzf datacompare-linux-x64.tar.gz | head    # 应该看到 datacompare/...
 > （已实测 51 个用例全绿，功能一致）。
 
 Windows 那边不需要操心这些：CI 已经会产出
-`datacompare-<ver>-windows-x64.zip`（解压即用，目标机器不用装 Python）。
+`datacompare-<ver>-windows-x64-standalone.zip`（解压即用，目标机器不用装 Python）。
 
 ### 关于 DuckDB 扩展
 

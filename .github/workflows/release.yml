@@ -119,6 +119,13 @@ jobs:
           Write-Host "----- Release notes -----"
           Get-Content notes.md
 
+      - name: Append artifact guide to release notes
+        shell: pwsh
+        run: |
+          # Release 页面上直接写清三个产物给谁用，不然只能对着文件名猜
+          python -c "import pathlib; g=pathlib.Path('docs/RELEASE-ASSETS.md').read_text(encoding='utf-8'); p=pathlib.Path('notes.md'); p.write_text(p.read_text(encoding='utf-8').rstrip()+chr(10)*2+g, encoding='utf-8')"
+          Get-Content notes.md | Select-Object -Last 10
+
       - name: Download bundled Python installer
         shell: pwsh
         run: |
@@ -194,7 +201,20 @@ jobs:
           echo "version=$VER" >> "$GITHUB_OUTPUT"
           echo "python=$PYVERS" >> "$GITHUB_OUTPUT"
           echo "platforms=$PLATS" >> "$GITHUB_OUTPUT"
-          echo "目标：datacompare $VER / Python $PYVERS / $PLATS"
+
+          # 产物名要能自解释，否则三个包摆在 Release 上分不清：
+          #   py313 / py312-313     目标 Python（需目标机自备）
+          #   linux-win             覆盖的平台
+          PY_TAG="py$(echo "$PYVERS" | tr ',' '\n' | sed 's/\.//g' | paste -sd- -)"
+          PLAT_TAG="$(echo "$PLATS" | tr ',' '\n' | while read -r p; do
+            case "$p" in
+              *win*)   echo win ;;
+              *linux*) echo linux ;;
+              *)       echo "$p" ;;
+            esac
+          done | sort -u | paste -sd- -)"
+          echo "tag=$PY_TAG-$PLAT_TAG" >> "$GITHUB_OUTPUT"
+          echo "目标：datacompare $VER / Python $PYVERS / $PLATS → wheels-src-$PY_TAG-$PLAT_TAG"
 
       - name: Install build dependencies
         run: |
@@ -211,7 +231,7 @@ jobs:
             --with-extensions \
             --zip
           mv dist/offline-bundle.tar.gz \
-             "dist/datacompare-${{ steps.tgt.outputs.version }}-offline-bundle.tar.gz"
+             "dist/datacompare-${{ steps.tgt.outputs.version }}-wheels-src-${{ steps.tgt.outputs.tag }}.tar.gz"
           ls -lh dist/*.tar.gz
 
       - name: Show MANIFEST
@@ -220,8 +240,8 @@ jobs:
       - name: Upload artifact (workflow run)
         uses: actions/upload-artifact@v4
         with:
-          name: datacompare-offline-bundle-${{ steps.tgt.outputs.version }}
-          path: dist/datacompare-*-offline-bundle.tar.gz
+          name: datacompare-wheels-src-${{ steps.tgt.outputs.version }}
+          path: dist/datacompare-*-wheels-src-*.tar.gz
           retention-days: 30
 
       - name: Upload asset to GitHub Release
@@ -234,5 +254,5 @@ jobs:
           # 两个 job 并行跑，Release 可能还没被 windows 那个 job 建出来
           gh release view "$TAG" >/dev/null 2>&1 || \
             gh release create "$TAG" --title "$TAG" --generate-notes
-          gh release upload "$TAG" dist/datacompare-*-offline-bundle.tar.gz --clobber
+          gh release upload "$TAG" dist/datacompare-*-wheels-src-*.tar.gz --clobber
           gh release view "$TAG" --json assets --jq '.assets[] | "\(.name)  \(.size) bytes"'

@@ -4,10 +4,12 @@
 
 .DESCRIPTION
     在联网的 Windows 机器上运行。产出（默认 dist\release\）：
-      datacompare-<ver>-windows-x64.zip       解压即用（PyInstaller onedir，无需 Python）
-      datacompare-<ver>-offline-win-x64.zip   Python 离线安装包（wheels + DuckDB 扩展，
-                                              传入 -PythonInstaller 时附带 Python 安装器；
-                                              加 -WithSource 再带源码，供内网二次开发）
+      datacompare-<ver>-windows-x64-standalone.zip
+                                              解压即用（PyInstaller onedir，无需 Python）
+      datacompare-<ver>-windows-x64-offline-kit.zip
+                                              Windows 离线套件：自带 Python 安装器 +
+                                              wheels + 源码，目标机没 Python 也能装
+                                              （传入 -PythonInstaller；加 -WithSource 带源码）
 
 .PARAMETER Version
     版本号。默认从 pyproject.toml 的 version 读取。
@@ -153,7 +155,7 @@ if (-not $SkipExe) {
     if (-not (Test-Path $exeDir)) { throw "构建产物不存在：$exeDir" }
 
     Write-Step "打包 exe zip"
-    $exeZip = Join-Path $ReleaseDir "datacompare-$Version-windows-x64.zip"
+    $exeZip = Join-Path $ReleaseDir "datacompare-$Version-windows-x64-standalone.zip"
     $zip = New-Zip $exeZip
     try {
         Add-DirToZip -Zip $zip -Dir $exeDir -Prefix "datacompare"
@@ -195,7 +197,7 @@ if (-not $SkipOffline) {
     }
 
     Write-Step "打包离线 zip"
-    $offZip = Join-Path $ReleaseDir "datacompare-$Version-offline-win-x64.zip"
+    $offZip = Join-Path $ReleaseDir "datacompare-$Version-windows-x64-offline-kit.zip"
     $zip = New-Zip $offZip
     try { Add-DirToZip -Zip $zip -Dir $bundleDir -Prefix "" } finally { $zip.Dispose() }
     Write-Host ("    " + $offZip) -ForegroundColor Green

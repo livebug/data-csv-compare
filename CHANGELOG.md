@@ -7,6 +7,12 @@
 
 ### 变更
 
+- **Release 产物改名**，三个包别再让人对着名字猜（旧名混着 offline/windows 两种词序）：
+  - `datacompare-<ver>-windows-x64.zip` → `-windows-x64-standalone.zip`（免 Python，解压即用）
+  - `datacompare-<ver>-offline-win-x64.zip` → `-windows-x64-offline-kit.zip`（自带 Python 安装器 + wheels + 源码）
+  - `datacompare-<ver>-offline-bundle.tar.gz` → `-wheels-src-py<版本>-<平台>.tar.gz`
+    （自备 Python；名字里的 `py313` / `linux-win` 直接说明兼容性与平台）
+  - Release 说明自动附上「三个文件怎么选」表格（`docs/RELEASE-ASSETS.md`）
 - 清理死代码（全仓库搜过确认零引用，均可从 git 历史找回）：
   `SourceSpec.display_name()`、`is_excel_kind`、`Stats._ratio()`、
   `ColumnResult.diff_rate`、`normalize.normalize_text_py()`、`numeric_clean_expr()`
@@ -14,6 +20,7 @@
 
 ### 文档
 
+- 新增 `docs/RELEASE-ASSETS.md`（产物选择表，同时会拼进 Release 说明）
 - `README.md`：离线部署的体积改成实测值（默认包 102MB / tar.gz 72MB / 免 Python 包 130MB）、
   制作命令去掉写死的 `--python 3.12`、开发与测试一节换成实际命令
   （`requirements-dev.txt`、pytest、pyflakes）并补上 CI 四个作业的说明

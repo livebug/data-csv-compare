@@ -301,15 +301,24 @@ cd source && ../venv-dev/bin/python -m pytest tests -q
 
 **不想本地打包就让 GitHub 打**：Actions → **Build Release** → *Run workflow*，
 填目标 Python 版本（默认 `3.13`，即开发环境）和平台（默认 `linux-x64,win-x64`），
-跑完在 Artifacts 里下载 `datacompare-offline-bundle-<ver>`；
-打 `v*` tag 发版时会自动把同一个包挂到 GitHub Release 上。
-跨平台 wheel 全部在 Linux runner 上就能备齐，不需要两台机器。
+跑完在 Artifacts 里下载 `datacompare-wheels-src-<ver>`；
+打 `v*` tag 发版时会自动把同一个包挂到 GitHub Release 上（Release 说明里带
+「三个文件怎么选」的表格）。跨平台 wheel 全部在 Linux runner 上就能备齐，不需要两台机器。
 
 **方案 B**：打包成原生可执行程序，目标机器可以完全没有 Python。
 注意 PyInstaller 不支持交叉编译，要在目标系统上各打一次；Windows 的包 CI 会直接产出，
 Linux 上在一个 glibc 较老的容器里打最稳（已实测的命令见 `docs/DEPLOY.md` 方案 B）。
 
-完整步骤、Docker 镜像做法（不想用 wheel 也不想用可执行文件的话）、定时任务配置、
+| 产物 | 目标机 | 要 Python 吗 |
+| --- | --- | --- |
+| `datacompare-<ver>-windows-x64-standalone.zip` | Windows | 不要，解压即用 |
+| `datacompare-<ver>-windows-x64-offline-kit.zip` | Windows | 不要（自带 3.12 安装器） |
+| `datacompare-<ver>-wheels-src-py<版本>-<平台>.tar.gz` | Linux / Windows | 要，版本同文件名 |
+
+> Linux 的免 Python 包不在 Release 里（PyInstaller 不能交叉编译，CI 只有 Windows runner），
+> 在 Linux 上按 `docs/DEPLOY.md` 方案 B 的命令自己打一次即可。
+
+完整步骤、多个 Python 版本的支持、Docker 镜像做法、定时任务配置、
 glibc 版本兼容性、杀软误报处理等，见 **[docs/DEPLOY.md](docs/DEPLOY.md)**。
 
 ---
