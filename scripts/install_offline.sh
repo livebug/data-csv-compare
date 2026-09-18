@@ -5,7 +5,7 @@
 #     bash install_offline.sh
 #
 # 可选环境变量：
-#     PYTHON=python3.12      指定解释器（默认自动挑 3.9+ 的 python3）
+#     PYTHON=python3.13      指定解释器（默认自动挑 3.9+ 的 python3）
 #     VENV_DIR=./venv        虚拟环境目录
 #     EXT_DIR=~/.duckdb/extensions    DuckDB 扩展的安装位置
 
@@ -28,6 +28,7 @@ fi
 if [[ -z "$PY" ]]; then
     echo "错误：找不到 Python 解释器。" >&2
     echo "      本方案要求目标机器已装 Python 3.9+。" >&2
+    echo "      完全没有 Python 请用免安装整体包（见 docs/DEPLOY.md 方案 B）。" >&2
     echo "      完全没有 Python 请改用 PyInstaller 单文件方案（见 docs/DEPLOY.md 方案 C）。" >&2
     exit 1
 fi

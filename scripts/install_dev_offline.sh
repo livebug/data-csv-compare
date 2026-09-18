@@ -9,7 +9,7 @@
 #     bash install_dev_offline.sh
 #
 # 可选环境变量：
-#     PYTHON=python3.12            指定解释器（默认自动挑 3.9+ 的 python3）
+#     PYTHON=python3.13              指定解释器（默认自动挑 3.9+ 的 python3）
 #     VENV_DIR=./venv-dev          虚拟环境目录
 #     SOURCE_DIR=./source          源码目录（可换成你自己 checkout 的仓库路径）
 #     WHEELS_DIR=./wheels          wheel 目录

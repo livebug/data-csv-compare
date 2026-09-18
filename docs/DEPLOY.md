@@ -76,7 +76,7 @@ python scripts/build_offline_bundle.py \
 
 | 参数 | 说明 |
 | --- | --- |
-| `--python` | 目标机器的 Python 版本，可多个：`3.11,3.12` |
+| `--python` | 目标机器的 Python 版本，可多个：`3.12,3.13`（默认 `3.13`，即开发环境；只有你的开发机/内网机器是别的版本时才要改） |
 | `--platforms` | `linux-x64` / `linux-arm64` / `win-x64` / `win-arm64`，也可直接写 pip 平台标签（如 `manylinux_2_28_x86_64`） |
 | `--with-extensions` | 顺便下载 DuckDB 的 `excel` / `json` 扩展，离线机器可直接用 |
 | `--no-source` | **不带源码**。默认是带的（因为内网经常要二次开发）；只部署就加这个，包体积从约 85MB 降到约 40MB |
@@ -118,7 +118,7 @@ offline-bundle/
 | 输入 | 默认值 | 说明 |
 | --- | --- | --- |
 | `version` | 空 = 读 `pyproject.toml` | 手动触发时用来命名产物 |
-| `python_versions` | `3.9,3.10,3.11,3.12,3.13` | 逗号分隔，与目标机器的 Python 严格对应 |
+| `python_versions` | `3.13` | 逗号分隔；只有内网开发机是别的 Python 版本时才需要改 |
 | `platforms` | `linux-x64,win-x64` | `linux-x64` / `linux-arm64` / `win-x64` / `win-arm64`，也可写 pip 平台标签 |
 
 为什么能在一个 Linux runner 上备齐 Windows 的 wheel：
@@ -219,6 +219,36 @@ cd source
 4. 安装脚本全程 `--no-index --find-links wheels`，一次网络请求都不会发；
    如果发现装得慢或者报连接超时，说明某个命令漏了 `--no-index`。
 
+### 老 Python / 老 glibc 会装到较低版本的 DuckDB
+
+这是**正常现象**，不是包做错了：老 glibc 上只剩老 wheel 带对应标签。
+
+| 目标 | 装到的 DuckDB | 原因 |
+| --- | --- | --- |
+| Python 3.9 | 1.4.5 | DuckDB 从 1.5 起不再发 cp39 wheel |
+| Python 3.10 ~ 3.13 | 1.5.5 | 最新版 |
+| glibc < 2.28（CentOS 7 / RHEL 7 等） | 1.2.2 | 新 wheel 只带 `manylinux_2_28` 标签 |
+
+都在 `duckdb>=1.1.0` 的允许范围内，且 **1.2.2 上跑过完整测试（51 个用例全绿）**，
+所以对比结果一致，只是引擎旧一些。装的时候 pip 会自己挑，不用管。
+
+正因为有这种差异，某些「Python × 平台」组合会**下不到任何 wheel**（例如
+`3.9 + manylinux_2_28_x86_64`）—— 构建脚本会打警告并跳过，`MANIFEST.txt` 里记一笔；
+但若某个 Python 版本在所有平台下都下不到，就直接报错，不会默默出一个装不上的包。
+
+### 为什么离线包里的开发工具链是钉死版本的
+
+见 `scripts/build_offline_bundle.py` 里的 `DEV_TOOLCHAIN`。两个坑都踩过：
+
+1. `pip download --python-version` / `--platform` 只影响「选哪个 wheel」，
+   **不按目标解释器评估环境标记** → `colorama`（Windows 上 pytest 要用）这类依赖
+   会被漏掉，内网 `pip install -r requirements-dev.txt` 直接失败；
+2. 同一个包在包里放了多个版本时，内网 pip 要 backtracking，实测会以
+   `ERROR: Package 'setuptools' requires a different Python` 收场。
+
+所以离线包里每个开发包**只留一个版本**。改这个列表后跑一下 CI 的 `test-offline`
+作业（在容器里真离线装一遍再跑测试），本地开发机是验证不了这两类问题的。
+
 > Windows 那个 `datacompare-<ver>-offline-win-x64.zip`（含 Python 安装器、目标机器
 > 不用装 Python）现在也带源码了（CI 里传了 `-WithSource`），一样能二次开发，
 > 只是它只覆盖 Python 3.12 + Windows；要全平台全版本就用跨平台的
@@ -253,6 +283,43 @@ python scripts/build_exe.py --onedir --clean --with-extensions
 ```bash
 ./dist/datacompare/datacompare compare -b 旧.csv -a 新.csv -k 单据号 -o out
 ```
+
+**Linux 上要先装 `binutils`**，否则 PyInstaller 会报
+`On Linux, objdump is required`（Debian/Ubuntu：`apt-get install -y binutils`；
+RHEL/CentOS：`yum install -y binutils`）。
+
+### Linux 整体包：在老一点的发行版里打（已实测）
+
+可执行文件会绑定打包机的 glibc 版本，**在越老的系统上打，能跑的目标机越多**。
+不想专门找一台老机器，就用容器（在任意装了 Docker 的机器上执行，已实测通过）：
+
+```bash
+docker run --rm -v "$PWD":/src:ro python:3.13-slim-bullseye bash -c '
+  set -e
+  apt-get update -qq && apt-get install -y -qq --no-install-recommends binutils
+  cp -r /src /work && cd /work
+  pip install -r requirements.txt pyinstaller
+  python scripts/build_exe.py --onedir --clean --with-extensions
+  ./dist/datacompare/datacompare --version
+'
+# 产物在容器里，取出来：
+docker cp <容器名>:/work/dist/datacompare ./datacompare-linux-x64
+```
+
+| 打包方式 | 产物要求的最低 glibc | 能跑在 |
+| --- | --- | --- |
+| `python:3.13-slim-bullseye`（Debian 11，已验证） | 2.31 | Debian 11+ / Ubuntu 20.04+ / RHEL 9+ |
+| `python:3.13-slim-bookworm`（Debian 12） | 2.36 | Debian 12+ / Ubuntu 22.04+ |
+| GitHub 的 `ubuntu-latest` | 2.39 | Ubuntu 24.04+ |
+
+> **CentOS 7 / RHEL 7（glibc 2.17）跑不了上面任何一种**：DuckDB 新版的 wheel
+> 要求 glibc ≥ 2.28，PyInstaller 打的包也一样。这种机器请改用方案 A
+> （装个 Python 3.9+ 再离线装 wheel），或者在 `manylinux2014` 容器里
+> `pip install "duckdb<1.3"` 后打包 —— 代价是引擎停在 1.2.2
+> （已实测 51 个用例全绿，功能一致）。
+
+Windows 那边不需要操心这些：CI 已经会产出
+`datacompare-<ver>-windows-x64.zip`（解压即用，目标机器不用装 Python）。
 
 ### 关于 DuckDB 扩展
 

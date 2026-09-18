@@ -26,8 +26,8 @@
     # 想把 git 历史也带走（内网继续提交 / 查历史）
     python scripts/build_offline_bundle.py --out dist/offline --with-git
 
-    # 同时准备 Windows 和 Linux、多个 Python 版本
-    python scripts/build_offline_bundle.py --out dist/offline \\
+    # 同时准备 Windows 和 Linux
+    python scripts/build_offline_bundle.py --out dist/offline \
         --python 3.12,3.13 --platforms win_amd64,manylinux_2_28_x86_64
 """
 
@@ -41,7 +41,7 @@ import shutil
 import subprocess
 import sys
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -78,6 +78,30 @@ SOURCE_SKIP_GLOBS = (
     "*.egg-info", "*.py[cod]", "*.spec", "*.duckdb", "*.duckdb.wal", ".DS_Store",
 )
 
+#: 离线包里开发/测试工具链的**固定版本**（不是读 requirements-dev.txt）。
+#:
+#: 为什么钉死：
+#:   1. ``pip download --python-version`` / ``--platform`` 只影响「选哪个 wheel」，
+#:      **不按目标解释器评估环境标记** → pytest 的 `colorama; sys_platform=="win32"`
+#:      这类依赖会被漏掉，Windows 内网就装不上；
+#:   2. 同一个包在包里留多个版本时，内网 pip 要 backtracking，实测会直接报
+#:      `Package 'setuptools' requires a different Python` 而失败。
+#: 所以每个包只留一个版本，且都满足 requirements-dev.txt 里的松散约束。
+DEV_TOOLCHAIN = [
+    "pip==25.0.1",
+    "setuptools==75.3.4",
+    "wheel==0.45.1",
+    "pytest==8.3.5",
+    "pluggy==1.5.0",
+    "iniconfig==2.1.0",
+    "packaging==26.2",
+    "colorama==0.4.6",            # Windows 上 pytest 要（sys_platform == "win32"）
+    # 下面三个是 3.9/3.10 才用得上的 marker 依赖，留着以防 --python 填了老版本
+    "exceptiongroup==1.3.1",      # python_version < "3.11"
+    "tomli==2.4.1",               # python_version < "3.11"
+    "typing-extensions==4.12.2",  # exceptiongroup 在 python_version < "3.13" 时要
+]
+
 
 def run(cmd: List[str], **kwargs) -> None:
     print("  $ " + " ".join(cmd))
@@ -103,8 +127,8 @@ def download_wheels(out_dir: str, step: str,
                     python_versions: List[str], platforms: List[str],
                     req_rel: str = "",
                     packages: Optional[List[str]] = None,
-                    loop_platforms: bool = True) -> None:
-    """按「Python 版本（× 平台）」逐个下载。
+                    loop_platforms: bool = True) -> List[Tuple[str, Optional[str]]]:
+    """按「Python 版本（× 平台）」逐个下载，返回失败的组合列表。
 
     注意：不能把多个 ``--platform`` 塞进同一次 ``pip download``——
     pip 对每个包只会挑一个匹配的 wheel，结果就是只拿到第一个平台。
@@ -113,25 +137,37 @@ def download_wheels(out_dir: str, step: str,
     ``loop_platforms=False`` 用于纯 Python 的依赖（pytest/setuptools/wheel/pip）：
     它们都是 ``py3-none-any``，跟平台无关，只按 Python 版本下一遍就够。
     此时应传 ``packages`` 而不是 ``req_rel``，见 :func:`read_dev_packages`。
+
+    **有些组合为空是正常的**：老 glibc 上只剩老包带 `manylinux2014` 标签，
+    新 glibc 标签下可能根本没有该包（例如 Python 3.9 在 `manylinux_2_28_x86_64`
+    下已无 duckdb wheel）。这种情况只记警告并跳过（老 glibc 的 wheel 在新机器上
+    照样能装），真正的错误由 :func:`check_version_coverage` 兜底。
     """
     wheels_dir = os.path.join(out_dir, "wheels")
     os.makedirs(wheels_dir, exist_ok=True)
 
-    if req_rel:
+    if packages:
+        # 显式包名优先：requirements-dev.txt 里含 `-r requirements.txt`，
+        # 交给 pip 会按构建机平台把运行依赖再解析一遍（多带用不上的 wheel），
+        # 而且 marker 依赖（colorama/exceptiongroup/tomli）需要显式补进来。
+        spec = list(packages)
+        label = req_rel or " ".join(spec)
+    elif req_rel:
         req = os.path.join(ROOT, req_rel)
         if not os.path.exists(req):
             raise SystemExit(f"找不到依赖清单：{req}")
         spec = ["-r", req]
         label = req_rel
     else:
-        spec = list(packages or [])
-        label = " ".join(spec)
+        spec = []
+        label = ""
     if not spec:
         raise SystemExit("没有要下载的依赖（req_rel 与 packages 都为空）")
 
     targets = [(pyver, plat)
                for pyver in python_versions
                for plat in (platforms if loop_platforms else [None])]
+    failed: List[Tuple[str, Optional[str]]] = []
     for pyver, platform in targets:
         cmd = [
             sys.executable, "-m", "pip", "download",
@@ -148,29 +184,36 @@ def download_wheels(out_dir: str, step: str,
         try:
             run(cmd)
         except subprocess.CalledProcessError as exc:
-            hint = (
-                "  该组合可能没有对应 wheel，请去掉这个组合。" if platform else
-                "  该依赖可能没有纯 Python wheel，请手动确认。"
-            )
-            raise SystemExit(f"下载失败（{suffix}）。\n{hint}\n"
-                             f"  原始错误：{exc}") from exc
+            failed.append((pyver, platform))
+            print(f"      警告：pip download 失败（退出码 {exc.returncode}），"
+                  "跳过这个组合；上面 pip 的输出里会写是哪个包没有匹配的 wheel")
+            print("            常见原因：该 Python 版本在那个平台标签下已经没有 wheel，"
+                  "例如 3.9+manylinux_2_28（duckdb 从 1.5 起不再发 cp39）")
+    return failed
 
 
-def read_dev_packages(req_rel: str = "requirements-dev.txt") -> List[str]:
-    """读 ``requirements-dev.txt``，只留具体包名，丢掉 ``-r requirements.txt`` 这类行。
+def check_version_coverage(failed: List[Tuple[str, Optional[str]]],
+                           python_versions: List[str],
+                           platforms: List[str]) -> None:
+    """允许个别组合为空，但**不接受某个 Python 版本整个下不到东西**。
 
-    开发/构建依赖全是纯 Python wheel，与目标平台无关。若把 ``-r requirements.txt``
-    一起交给 pip，它会顺手按**构建机**的平台重新解析一遍运行依赖，
-    于是包里会多出一堆目标环境用不上的平台 wheel（duckdb 一个就 20MB）。
+    组合为空是正常的（见 :func:`download_wheels` 的说明）；一个 Python 版本在
+    **所有**目标平台下都空，基本是版本号写错或依赖真不支持，必须拦住。
     """
-    items: List[str] = []
-    with open(os.path.join(ROOT, req_rel), encoding="utf-8") as fh:
-        for raw in fh:
-            line = raw.split("#", 1)[0].strip()
-            if not line or line.startswith("-"):
-                continue
-            items.append(line)
-    return items
+    if not failed:
+        return
+    print("\n以下组合没有可用 wheel，已跳过：")
+    for pyver, platform in failed:
+        print(f"  - Python {pyver}" + (f" / {platform}" if platform else ""))
+
+    dead = [p for p in python_versions
+            if all((p, pl) in failed for pl in platforms)]
+    if dead:
+        raise SystemExit(
+            f"错误：Python {', '.join(dead)} 在所有目标平台下都没下到 wheel。\n"
+            "  检查一下 --python / --platforms（不存在的版本号、写错的平台标签、"
+            "或架构对不上都会这样）。"
+        )
 
 
 def build_project_wheel(out_dir: str, step: str) -> None:
@@ -438,7 +481,8 @@ Windows 安装（只部署）
 
 def write_manifest(out_dir: str, version: str, python_versions: List[str],
                    platforms: List[str], revision: str, with_source: bool,
-                   with_dev: bool, with_git: bool, extensions: bool) -> None:
+                   with_dev: bool, with_git: bool, extensions: bool,
+                   skipped: Optional[List[Tuple[str, Optional[str]]]] = None) -> None:
     """写一份交付清单，方便内网那边核对「拿到的东西到底是哪一版」。"""
     wheels = []
     wheels_dir = os.path.join(out_dir, "wheels")
@@ -470,6 +514,15 @@ def write_manifest(out_dir: str, version: str, python_versions: List[str],
         f"含开发依赖  : {'是（setuptools/wheel/pip/pytest）' if with_dev else '否'}",
         f"含 DuckDB 扩展: {'是' if extensions else '否'}",
         "",
+    ]
+    if skipped:
+        lines.append("以下「Python × 平台」组合没有可用 wheel（正常现象，不是出错）：")
+        for pyver, platform in skipped:
+            lines.append(f"    Python {pyver}" + (f" / {platform}" if platform else ""))
+        lines.append("    （例如某些老 Python 在新 glibc 标签下已无 duckdb wheel；"
+                     "安装时 pip 会自己挑能用的那个）")
+        lines.append("")
+    lines += [
         f"wheel 清单（{len(wheels)} 个）",
         "-" * 30,
     ]
@@ -489,15 +542,20 @@ def write_manifest(out_dir: str, version: str, python_versions: List[str],
 def main() -> int:
     ap = argparse.ArgumentParser(description="制作 datacompare 离线交付包（内网部署 + 二次开发）")
     ap.add_argument("--out", default="dist/offline-bundle", help="输出目录")
-    ap.add_argument("--python", default="3.12",
-                    help="目标 Python 版本，逗号分隔，如 3.11,3.12")
+    ap.add_argument("--python", default="3.13",
+                    help="目标 Python 版本，逗号分隔，如 3.12,3.13（默认 3.13＝当前开发环境）")
     ap.add_argument("--platforms", default="linux-x64,win-x64",
                     help="目标平台：win-x64 / win-arm64 / linux-x64 / linux-arm64，"
                          "也可直接写 pip 平台标签（逗号分隔）")
-    ap.add_argument("--source", action=argparse.BooleanOptionalAction, default=True,
-                    help="带上完整源码（默认带；--no-source 只带 wheel）")
-    ap.add_argument("--dev", action=argparse.BooleanOptionalAction, default=True,
+    # 不用 argparse.BooleanOptionalAction（3.9+），两个开关更直白
+    ap.add_argument("--source", dest="source", action="store_true", default=True,
+                    help="带上完整源码（默认带）")
+    ap.add_argument("--no-source", dest="source", action="store_false",
+                    help="不带源码，只带 wheel")
+    ap.add_argument("--dev", dest="dev", action="store_true", default=True,
                     help="带上构建/测试依赖 setuptools/wheel/pip/pytest（默认带）")
+    ap.add_argument("--no-dev", dest="dev", action="store_false",
+                    help="不带构建/测试依赖")
     ap.add_argument("--with-git", action="store_true",
                     help="源码里连 .git 一起带（保留提交历史，包会大一些）")
     ap.add_argument("--with-extensions", action="store_true",
@@ -526,7 +584,7 @@ def main() -> int:
     if not platforms:
         raise SystemExit("没有解析出任何目标平台")
 
-    with_dev = args.dev and args.source
+    with_dev = args.dev
     total_steps = 3 + (1 if with_dev else 0) + (1 if args.source else 0) + \
         (1 if args.with_extensions else 0)
     step_no = 0
@@ -541,14 +599,16 @@ def main() -> int:
     print(f"datacompare {version}（源码 {revision}）→ {out_dir}\n")
 
     os.chdir(ROOT)
-    download_wheels(out_dir, next_step("下载运行依赖 wheel"),
-                    pyvers, platforms, req_rel="requirements.txt")
+    failed = download_wheels(out_dir, next_step("下载运行依赖 wheel"),
+                             pyvers, platforms, req_rel="requirements.txt")
     if with_dev:
-        download_wheels(out_dir, next_step("下载开发/构建依赖 wheel"),
-                        pyvers, platforms, req_rel="requirements-dev.txt",
-                        packages=read_dev_packages(), loop_platforms=False)
+        # 钉死版本 + 按平台各下一遍：pytest/setuptools 是 py3-none-any 无所谓，
+        # 但 tomli 2.4 起带 cpXXX 原生 wheel，只下构建机平台会让 Windows 缺 wheel。
+        failed += download_wheels(out_dir, next_step("下载开发/构建依赖 wheel"),
+                                  pyvers, platforms, packages=DEV_TOOLCHAIN)
     elif args.dev:
         print("跳过开发/构建依赖（--no-source 时不需要）")
+    check_version_coverage(failed, pyvers, platforms)
     if not args.skip_project:
         build_project_wheel(out_dir, next_step("打包本项目 wheel"))
     if args.source:
@@ -571,7 +631,7 @@ def main() -> int:
     write_readme(out_dir, pyvers, platforms, version, args.source, with_dev,
                  args.with_git)
     write_manifest(out_dir, version, pyvers, platforms, revision, args.source,
-                   with_dev, args.with_git, args.with_extensions)
+                   with_dev, args.with_git, args.with_extensions, failed)
 
     total = sum(
         os.path.getsize(os.path.join(dp, f))

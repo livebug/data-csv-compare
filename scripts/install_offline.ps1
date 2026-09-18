@@ -72,6 +72,7 @@ if (-not $py) {
 if (-not $py) {
     Write-Host "错误：找不到 Python 解释器，且包内没有自带安装器。" -ForegroundColor Red
     Write-Host "      请改装 Python 3.9+，或用 -PythonExe 指定解释器；" -ForegroundColor Red
+    Write-Host "      完全没有 Python 请用免安装整体包（见 docs\DEPLOY.md 方案 B）。" -ForegroundColor Red
     Write-Host "      也可以改用 PyInstaller 方案（见 docs\DEPLOY.md 方案 C，无需 Python）。" -ForegroundColor Red
     exit 1
 }

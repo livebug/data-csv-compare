@@ -299,7 +299,7 @@ cd source && ../venv-dev/bin/python -m pytest tests -q
 内网收到包先看一眼就知道是哪一版。只要 wheel 不要源码就加 `--no-source --no-dev`。
 
 **不想本地打包就让 GitHub 打**：Actions → **Build Release** → *Run workflow*，
-填目标 Python 版本（默认 `3.9,3.10,3.11,3.12,3.13`）和平台（默认 `linux-x64,win-x64`），
+填目标 Python 版本（默认 `3.13`，即开发环境）和平台（默认 `linux-x64,win-x64`），
 跑完在 Artifacts 里下载 `datacompare-offline-bundle-<ver>`；
 打 `v*` tag 发版时会自动把同一个包挂到 GitHub Release 上。
 跨平台 wheel 全部在 Linux runner 上就能备齐，不需要两台机器。

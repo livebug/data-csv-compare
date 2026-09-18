@@ -27,7 +27,7 @@ env:
   PYTHON_VERSION: "3.12"
   PYTHONIOENCODING: "utf-8"
   # 离线交付包默认覆盖的目标（workflow_dispatch 里可以覆盖）
-  OFFLINE_PYTHON_VERSIONS: "3.9,3.10,3.11,3.12,3.13"
+  OFFLINE_PYTHON_VERSIONS: "3.13"
   OFFLINE_PLATFORMS: "linux-x64,win-x64"
 
 jobs:
@@ -54,8 +54,45 @@ jobs:
       - name: Run tests
         run: python -m pytest tests -q
 
+  # 离线包能不能装：真在容器里 `--no-index` 装一遍再跑测试。
+  # 开发机只有一个解释器，本地跑 `pip download` 验证不了「内网装得上」——
+  # 踩过：marker 依赖（colorama/exceptiongroup/tomli）没带进去、
+  # 同一个包留多个版本时内网 pip backtracking 后报
+  # "Package 'setuptools' requires a different Python"。
+  test-offline:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python (只用来下载 wheel)
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Download wheels
+        run: |
+          python scripts/build_offline_bundle.py \
+            --out dist/offline-check \
+            --python "${{ env.PYTHON_VERSION }}" \
+            --platforms linux-x64 \
+            --no-source --skip-project
+
+      - name: Offline install and test in python:${{ env.PYTHON_VERSION }}
+        run: |
+          # 挂只读 + 拷到容器里再装：避免 root 在 runner 工作区留下 root 属主的
+          # *.egg-info（本地这么试过，删都删不掉）
+          docker run --rm -v "$PWD:/w:ro" "python:${{ env.PYTHON_VERSION }}-slim" bash -c "
+            set -e
+            cp -r /w /work && cd /work
+            pip install --quiet --no-index --find-links /w/dist/offline-check/wheels -r requirements-dev.txt
+            pip install --quiet --no-index --find-links /w/dist/offline-check/wheels -e .
+            python -c 'import duckdb; print(\"duckdb\", duckdb.__version__)'
+            python -m pytest tests -q
+          "
+
   build:
-    needs: test
+    needs: [test, test-offline]
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -126,7 +163,7 @@ jobs:
   # 放 ubuntu-latest 是因为 `pip download --platform ...` 能一次备齐多平台 wheel，
   # 不需要真的在 Windows/Linux 上各跑一遍。
   offline-bundle:
-    needs: test
+    needs: [test, test-offline]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

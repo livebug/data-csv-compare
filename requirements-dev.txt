@@ -4,6 +4,14 @@
 #
 # 离线安装：
 #     pip install --no-index --find-links wheels/ -r requirements-dev.txt
+#
+# 注意：离线包里带的是**钉死版本**（见 scripts/build_offline_bundle.py 的
+# DEV_TOOLCHAIN），不是这个文件里的松散约束。原因有两个，都踩过：
+#   1. `pip download --python-version` 只影响选哪个 wheel、**不评估环境标记**
+#      → 不钉死会漏掉 colorama 这类按需依赖（Windows 上 pytest 要用），内网装不上；
+#   2. 同一个包在离线包里留多个版本 → 内网 pip backtracking 后报
+#      "Package 'setuptools' requires a different Python" 而失败。
+# 所以这里保持宽松（方便本地开发），由构建脚本负责产出一套自洽的离线组合。
 
 -r requirements.txt
 
