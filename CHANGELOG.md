@@ -3,6 +3,51 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [0.3.1] - 2026-09-18
+
+本版重点：**修掉离线包「装了也跑不起来」的两类问题**，并按实际部署口径把范围收口 ——
+开发环境是 Python 3.13，离线 wheel 包就只服务它；运行环境可能连 Python 都没有，
+那条路走方案 B 的免安装整体包（无需 Python）。
+
+### 修复
+
+- **离线包的开发/测试依赖漏了环境标记依赖**：`pip download --python-version` /
+  `--platform` 只影响「选哪个 wheel」，**不按目标解释器评估 marker**，
+  导致 `colorama`（Windows 上 pytest 要用）没进包 —— Windows 内网
+  `install_dev_offline.sh` 直接装不上
+- **同一个包多版本导致内网 pip 解析失败**：包里同时存在多个 setuptools/pytest/pip
+  版本时，内网 `pip install -r requirements-dev.txt` 会长时间 backtracking，
+  最后报 `ERROR: Package 'setuptools' requires a different Python`。
+  现在开发工具链钉死成 `DEV_TOOLCHAIN`，每个包只留一个版本
+- `download_wheels()` 里 `req_rel` 优先级高于 `packages`，显式包名被静默忽略
+  （0.3.0 声称「不再按构建机平台重复解析运行依赖」，实际没生效）
+- 个别「Python × 平台」组合下不到 wheel（如 `3.9 + manylinux_2_28_x86_64`，
+  老 Python 在新 glibc 标签下已无 duckdb wheel）不再当致命错误：只警告并记入
+  `MANIFEST.txt`；但某个 Python 版本在所有平台下都下不到时会立即报错，
+  不会默默产出一个装不上的包
+- 开发依赖按平台各下一遍：tomli 2.4 起带 `cpXXX` 原生 wheel，
+  只下构建机平台会让 Windows 目标缺 wheel
+
+### 变更
+
+- 离线包默认目标收成 `--python 3.13`（＝当前开发环境），CI 默认值同步；
+  内网开发机是别的 Python 版本时用 `--python` 显式指定
+- `scripts/build_offline_bundle.py` 不再用 `argparse.BooleanOptionalAction`
+  （3.9+ 语法），改成 `--x` / `--no-x` 两个开关
+
+### 测试
+
+- CI 新增 `test-offline` 作业：在 `python:3.13-slim` 容器里**真离线**装一遍
+  （`--no-index --find-links`）再跑测试，专治上面两类问题 ——
+  本地开发机只有一个解释器，跑 `pip download` 是验证不了「内网装得上」的
+- `build` 与 `offline-bundle` 两个发版作业改为依赖 `test` + `test-offline`
+
+### 文档
+
+- `docs/DEPLOY.md` 新增「老 Python / 老 glibc 会装到较低版本的 DuckDB」与
+  「为什么离线包里的开发工具链是钉死版本的」
+- `requirements-dev.txt` 补上「离线包里是钉死版本」的说明
+
 ## [0.3.0] - 2026-09-17
 
 本版重点：**离线交付包从「只能跑」升级为「能改」** —— wheel 与源码一起带进内网，

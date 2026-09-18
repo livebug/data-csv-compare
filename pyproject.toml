@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "datacompare"
-version = "0.3.0"
+version = "0.3.1"
 description = "前后数据集全字段对比工具：出对比报告、定位异常数据，大文件落 DuckDB"
 readme = "README.md"
 requires-python = ">=3.9"
