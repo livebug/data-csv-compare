@@ -99,11 +99,6 @@ class ColumnProfile:
     def null_rate(self) -> float:
         return (self.nulls / self.total) if self.total else 0.0
 
-    def _ratio(self, ok: int) -> float:
-        denom = ok + 0
-        # 分母用「非空且尝试解析」的总数更合适，由调用方在 resolve 里保证
-        return (ok / denom) if denom else 0.0
-
 
 class ColumnProfileLike(Protocol):
     """:class:`ColumnProfile` 的结构化类型，供类型推断函数使用。"""
@@ -152,10 +147,6 @@ class ColumnResult:
     @property
     def severe_total(self) -> int:
         return self.value_diff + self.null_mismatch + self.type_mismatch
-
-    @property
-    def diff_rate(self) -> float:
-        return (self.diff_total / self.matched_rows) if self.matched_rows else 0.0
 
     @property
     def severe_rate(self) -> float:

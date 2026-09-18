@@ -130,15 +130,6 @@ class SourceSpec:
             return "|"
         return None  # 交给 DuckDB 嗅探
 
-    def display_name(self) -> str:
-        if self.name:
-            return self.name
-        return os.path.basename(self.path or "")
-
-    @property
-    def is_excel_kind(self) -> bool:
-        return self.resolved_kind() == "excel"
-
 
 # --------------------------------------------------------------------------
 # 比较策略

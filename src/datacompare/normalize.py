@@ -76,8 +76,6 @@ _CURRENCY_CHARS = "\u00a5\uffe5$\u20ac\u00a3\u20b9\uff04"
 #: 需要做替换的字符集合（用于廉价闸门；集合内不含 ASCII 的 ``-`` 和 ``]``）
 _SPECIAL_GUARD = "[" + _SPECIAL_FROM + "]"
 
-_FW_TABLE = str.maketrans(_SPECIAL_FROM, _SPECIAL_TO)
-
 _TRUE_TOKENS = ["true", "t", "yes", "y", "1", "是", "真", "有"]
 _FALSE_TOKENS = ["false", "f", "no", "n", "0", "否", "假", "无"]
 
@@ -111,27 +109,6 @@ _DATE_FORMATS_DAY = [
     "%Y.%m.%d",
     "%Y%m%d",
 ]
-
-
-# --------------------------------------------------------------------------
-# Python 侧的等价实现（用于归一化 null token、展示等）
-# --------------------------------------------------------------------------
-def normalize_text_py(value: Optional[str], s: StringOptions) -> Optional[str]:
-    """SQL :func:`string_expr` 的 Python 等价实现。"""
-    if value is None:
-        return None
-    text = str(value)
-    if s.fullwidth_to_halfwidth:
-        text = text.translate(_FW_TABLE)
-    if s.ignore_whitespace:
-        text = re.sub(_WS_ANY, "", text)
-    elif s.collapse_whitespace:
-        text = re.sub(_WS_ANY, " ", text)
-    if s.trim:
-        text = text.strip(" \t\r\n\f\v" + _NBSP + _IDEO_SPACE)
-    if s.case_insensitive:
-        text = text.lower()
-    return text
 
 
 # --------------------------------------------------------------------------
@@ -220,11 +197,6 @@ def _numeric_clean(col: str, n: NumericOptions, s: StringOptions) -> str:
     if n.decimal_separator == ",":
         expr = f"replace({expr}, ',', '.')"
     return expr
-
-
-def numeric_clean_expr(col: str, n: NumericOptions, s: StringOptions) -> str:
-    """清洗后的数值文本（用于报告里展示归一化结果）。"""
-    return _numeric_clean(col, n, s)
 
 
 def numeric_expr(col: str, n: NumericOptions, s: StringOptions) -> str:
