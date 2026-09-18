@@ -3,6 +3,27 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [0.3.3] - 2026-09-18
+
+0.3.2 把 CI 的构建 Python 换成了 3.13，但 **Windows 离线套件里的 wheel 还是 cp312** ——
+`build_windows_release.ps1` 给 `build_offline_bundle.py` 写死了 `--python 3.12`，
+那个包拿到 3.13 的机器上装不上。本版修掉，并加上出包后的自动校验。
+
+### 修复
+
+- `build_windows_release.ps1`：离线套件的 `--python` 改为**跟着构建解释器走**
+  （原来写死 3.12），并在 `-PythonInstaller` 的版本与构建版本不一致时直接报错
+- 新增 `scripts/check_windows_kit.py`：校验「CI 的 PYTHON_VERSION / 自带安装器 /
+  包里 wheel 的 cp 标签 / MANIFEST 里的目标 Python」四者一致，CI 出包后自动跑，
+  不一致就发不出去（这个坑踩了两次，本地 Linux 开发机测不出来）
+
+### 变更
+
+- Windows 产物统一由 Python 3.13 构建（0.3.2 起），自带安装器
+  `python-3.13.7-amd64.exe`
+
+> 0.3.2 的 `windows-x64-offline-kit.zip` 请勿使用，用 0.3.3 的。
+
 ## [0.3.2] - 2026-09-18
 
 本版修两个会把内网实施卡住的问题：Windows 产物是按 **Python 3.12** 构建的（而开发环境是 3.13，

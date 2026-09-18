@@ -147,6 +147,14 @@ jobs:
             -PythonInstaller "./${{ env.PYTHON_INSTALLER }}" `
             -WithSource
 
+      - name: Sanity check the offline kit
+        shell: pwsh
+        run: |
+          # 这个坑踩过两次：PYTHON_VERSION / 自带安装器 / 包里 wheel 的 cp 标签
+          # 三处只要有一处不一致，套件拿到内网就是 not a supported wheel
+          $kit = (Get-ChildItem dist/release/*-windows-x64-offline-kit.zip).FullName
+          python scripts/check_windows_kit.py $kit "${{ env.PYTHON_VERSION }}"
+
       - name: Upload artifacts (workflow run)
         uses: actions/upload-artifact@v4
         with:

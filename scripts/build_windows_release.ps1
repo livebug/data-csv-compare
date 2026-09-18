@@ -31,7 +31,7 @@
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File scripts\build_windows_release.ps1 `
-        -PythonInstaller C:\downloads\python-3.12.10-amd64.exe `
+        -PythonInstaller C:\downloads\python-3.13.7-amd64.exe `
         -IndexUrl https://pypi.tuna.tsinghua.edu.cn/simple
 #>
 [CmdletBinding()]
@@ -107,6 +107,17 @@ $py = Resolve-Python -Explicit $PythonExe
 Write-Host "    解释器：$py"
 $pyVer = & $py -c "import sys; print(sys.version.split()[0])" 2>$null
 Write-Host "    版本  ：$pyVer"
+# 离线套件里的 wheel 必须是这个版本编的（内网开发环境 = 构建环境，否则装不上）
+$pyMajorMinor = & $py -c "import sys; print('%d.%d' % sys.version_info[:2])" 2>$null
+Write-Host "    离线套件目标：Python $pyMajorMinor"
+
+# 自带的 Python 安装器必须跟构建版本对得上，否则包里的 cp3XX wheel 在那台机器上装不上
+if ($PythonInstaller) {
+    $instVer = [regex]::Match((Split-Path -Leaf $PythonInstaller), 'python-(\d+\.\d+)').Groups[1].Value
+    if ($instVer -and ($instVer -ne $pyMajorMinor)) {
+        throw "Python 安装器版本（$instVer）与构建版本（$pyMajorMinor）不一致：包里的 wheel 是 cp$($pyMajorMinor -replace '\.','') 的，装到 $instVer 上会报 not a supported wheel"
+    }
+}
 
 $pipArgs = @()
 if ($IndexUrl) { $pipArgs += @("--index-url", $IndexUrl) }
@@ -183,7 +194,7 @@ if (-not $SkipOffline) {
     # build_offline_bundle.py 默认带源码与开发依赖，发布包按需二选一
     $bundleArgs = @(
         (Join-Path $Root "scripts\build_offline_bundle.py"),
-        "--out", $bundleDir, "--python", "3.12", "--platforms", "win-x64", "--with-extensions"
+        "--out", $bundleDir, "--python", $pyMajorMinor, "--platforms", "win-x64", "--with-extensions"
     )
     if (-not $WithSource) { $bundleArgs += @("--no-source", "--no-dev") }
 
