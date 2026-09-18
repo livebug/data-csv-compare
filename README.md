@@ -47,10 +47,11 @@
 ```bash
 git clone <repo> && cd data-csv-compare
 python -m venv .venv
-.venv/bin/pip install -r requirements.txt
+.venv/bin/pip install -r requirements.txt          # 运行依赖，只有 3 个
+.venv/bin/pip install -r requirements-dev.txt      # 要改代码 / 跑测试再装这个
 ```
 
-依赖只有三个：`duckdb`、`openpyxl`、`PyYAML`。
+依赖只有三个：`duckdb`、`openpyxl`、`PyYAML`。开发环境用的是 Python 3.13。
 
 也可以装成命令行工具：
 
@@ -271,16 +272,16 @@ C++ 引擎）。详见 `docs/DEPLOY.md`。
 
 | | 方案 A：离线 wheel 包 | 方案 B：免安装可执行程序 |
 | --- | --- | --- |
-| 目标机器要有 Python | 要（3.9+） | 不要 |
-| 包体积 | 约 40MB（含源码 + 开发依赖约 85MB） | 约 130MB |
-| 制作命令 | `python scripts/build_offline_bundle.py --with-extensions --zip` | `python scripts/build_exe.py --onedir` |
+| 目标机器要有 Python | 要（3.9+） | **不要** |
+| 包体积 | 默认（3.13 / linux+win / 含源码与开发依赖）102MB，tar.gz 72MB；加 `--no-source --no-dev` 降到 54MB，只做一个平台再减一半 | 约 130MB，tar.gz 45MB |
+| 制作命令 | `python scripts/build_offline_bundle.py --with-extensions --zip` | `python scripts/build_exe.py --onedir --clean --with-extensions` |
 
 **方案 A**：在能联网的机器上把 wheel 全部下载下来，整包拷进内网，
 一条命令装好（`pip --no-index`，全程不联网，支持 Windows 和 Linux）：
 
 ```bash
-python scripts/build_offline_bundle.py --out dist/offline `
-    --python 3.12 --platforms win-x64,linux-x64 --with-extensions --zip
+python scripts/build_offline_bundle.py --out dist/offline \
+    --platforms win-x64,linux-x64 --with-extensions --zip   # --python 默认 3.13
 # 内网机器上：
 bash install_offline.sh            # Linux：装上就能跑
 powershell -File install_offline.ps1   # Windows：同上
@@ -305,10 +306,11 @@ cd source && ../venv-dev/bin/python -m pytest tests -q
 跨平台 wheel 全部在 Linux runner 上就能备齐，不需要两台机器。
 
 **方案 B**：打包成原生可执行程序，目标机器可以完全没有 Python。
-注意 PyInstaller 不支持交叉编译，要在目标系统上各打一次。
+注意 PyInstaller 不支持交叉编译，要在目标系统上各打一次；Windows 的包 CI 会直接产出，
+Linux 上在一个 glibc 较老的容器里打最稳（已实测的命令见 `docs/DEPLOY.md` 方案 B）。
 
-完整步骤、Docker 镜像做法、定时任务配置、glibc 版本兼容性、
-杀软误报处理等，见 **[docs/DEPLOY.md](docs/DEPLOY.md)**。
+完整步骤、Docker 镜像做法（不想用 wheel 也不想用可执行文件的话）、定时任务配置、
+glibc 版本兼容性、杀软误报处理等，见 **[docs/DEPLOY.md](docs/DEPLOY.md)**。
 
 ---
 
@@ -358,14 +360,19 @@ Python 只负责把规则翻译成 SQL。
 ## 十一、开发与测试
 
 ```bash
-.venv/bin/pip install pytest
-PYTHONPATH=src .venv/bin/python -m pytest tests -q
+.venv/bin/pip install -r requirements-dev.txt      # 开发依赖（含 pytest）
+.venv/bin/python -m pytest tests -q                # 51 个用例
+.venv/bin/python -m pyflakes src tests scripts     # 静态检查
 
 # 生成示例数据（故意埋了各类差异）并跑一遍
 .venv/bin/python examples/make_sample.py
-PYTHONPATH=src .venv/bin/python -m datacompare compare \
+.venv/bin/python -m datacompare compare \
     -b examples/before.csv -a examples/after.csv -o examples/out
 ```
+
+CI（`.github/workflows/release.yml`）在发版时跑四个作业：`test`（ubuntu 门禁）、
+`test-offline`（容器里真离线装一遍再跑测试）、`build`（Windows 上出 exe 包）、
+`offline-bundle`（出跨平台离线包）；后面两个都依赖前两个。
 
 ---
 

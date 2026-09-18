@@ -3,6 +3,25 @@
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [未发布]
+
+### 变更
+
+- 清理死代码（全仓库搜过确认零引用，均可从 git 历史找回）：
+  `SourceSpec.display_name()`、`is_excel_kind`、`Stats._ratio()`、
+  `ColumnResult.diff_rate`、`normalize.normalize_text_py()`、`numeric_clean_expr()`
+  ——最后一个连带删掉只服务它的 `_FW_TABLE`
+
+### 文档
+
+- `README.md`：离线部署的体积改成实测值（默认包 102MB / tar.gz 72MB / 免 Python 包 130MB）、
+  制作命令去掉写死的 `--python 3.12`、开发与测试一节换成实际命令
+  （`requirements-dev.txt`、pytest、pyflakes）并补上 CI 四个作业的说明
+- `docs/DEPLOY.md`：方案对比表补实测体积与「方案 C 见常见问题」的指引；
+  Linux 整体包的做法换成已验证的写法 —— 日志走 stderr、只把 tar 流到 stdout，
+  避免重定向出「假 tar.gz」（踩过：得到 45MB 文本文件，`tar` 报 not in gzip format）
+- `scripts/build_exe.py`：docstring 补 binutils 依赖与 glibc 注意事项
+
 ## [0.3.1] - 2026-09-18
 
 本版重点：**修掉离线包「装了也跑不起来」的两类问题**，并按实际部署口径把范围收口 ——

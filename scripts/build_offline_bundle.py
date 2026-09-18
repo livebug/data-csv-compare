@@ -16,9 +16,9 @@
 
 用法::
 
-    # 内网要二次开发：wheel + 源码一起带（默认行为）
-    python scripts/build_offline_bundle.py --out dist/offline \\
-        --python 3.12 --platforms linux-x64,win-x64 --with-extensions --zip
+    # 内网要二次开发：wheel + 源码一起带（默认行为，目标是开发环境的 3.13）
+    python scripts/build_offline_bundle.py --out dist/offline \
+        --platforms linux-x64,win-x64 --with-extensions --zip
 
     # 只给内网跑、不改代码：不带源码也不带开发依赖，包更小
     python scripts/build_offline_bundle.py --out dist/offline --no-source --no-dev
@@ -26,7 +26,7 @@
     # 想把 git 历史也带走（内网继续提交 / 查历史）
     python scripts/build_offline_bundle.py --out dist/offline --with-git
 
-    # 同时准备 Windows 和 Linux
+    # 内网开发机是别的 Python 版本（可写多个）
     python scripts/build_offline_bundle.py --out dist/offline \
         --python 3.12,3.13 --platforms win_amd64,manylinux_2_28_x86_64
 """

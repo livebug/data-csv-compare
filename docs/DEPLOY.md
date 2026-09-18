@@ -44,14 +44,14 @@
 | | 方案 A：离线 wheel 包 | 方案 B：免安装可执行程序 | 方案 C：带 Python 的镜像/基线 |
 | --- | --- | --- | --- |
 | 目标机器要有 Python | 要（3.9+） | **不要** | 要 |
-| 包体积 | ~40MB（单平台，不带源码） | ~130MB | 视基线而定 |
+| 包体积 | 默认（3.13 / linux+win / 含源码与开发依赖）102MB，tar.gz 72MB；`--no-source --no-dev` 降到 54MB，只做一个平台再减一半 | 约 130MB，tar.gz 45MB | 视基线而定 |
 | 是否需要编译 | 否 | 否，但在目标系统上打 | 否 |
 | 启动速度 | 快 | 快（目录模式 0.1s） | 快 |
 | 依赖管理 | pip 离线装 | 全静态 | 镜像自带 |
 | 适用场景 | 内网有 Python 环境 | 内网干净、不想装 Python | 已有容器/镜像体系 |
-| 状态 | **已实测通过** | **已实测通过** | 视环境而定 |
+| 状态 | **已实测通过** | **已实测通过** | 做法见「九、常见问题」里的 Docker 一节 |
 
-下面重点讲 A 和 B。
+下面重点讲 A 和 B（方案 C 只是一个 Dockerfile，见常见问题）。
 
 ---
 
@@ -63,11 +63,12 @@
 cd data-csv-compare
 python scripts/build_offline_bundle.py \
     --out dist/offline-bundle \
-    --python 3.12 \
     --platforms linux-x64,win-x64 \
     --with-extensions \
     --zip
 ```
+
+> `--python` 默认就是开发环境的 `3.13`；内网是别的版本才需要加（可写多个：`3.12,3.13`）。
 
 > 这条命令产出的包**默认同时带源码和开发依赖**，内网既能直接部署，
 > 也能在源码上二次开发（见下面「步骤 4」）。只想要最小部署包就加 `--no-source --no-dev`。
@@ -79,7 +80,7 @@ python scripts/build_offline_bundle.py \
 | `--python` | 目标机器的 Python 版本，可多个：`3.12,3.13`（默认 `3.13`，即开发环境；只有你的开发机/内网机器是别的版本时才要改） |
 | `--platforms` | `linux-x64` / `linux-arm64` / `win-x64` / `win-arm64`，也可直接写 pip 平台标签（如 `manylinux_2_28_x86_64`） |
 | `--with-extensions` | 顺便下载 DuckDB 的 `excel` / `json` 扩展，离线机器可直接用 |
-| `--no-source` | **不带源码**。默认是带的（因为内网经常要二次开发）；只部署就加这个，包体积从约 85MB 降到约 40MB |
+| `--no-source` | **不带源码**。默认是带的（因为内网经常要二次开发）；只部署就加这个，包体积从 102MB 降到 54MB |
 | `--no-dev` | 不带开发/构建依赖（setuptools / wheel / pip / pytest） |
 | `--with-git` | 源码里连 `.git` 一起带（保留提交历史，包会变大） |
 | `--zip` | 打成 `tar.gz` |
@@ -291,19 +292,22 @@ RHEL/CentOS：`yum install -y binutils`）。
 ### Linux 整体包：在老一点的发行版里打（已实测）
 
 可执行文件会绑定打包机的 glibc 版本，**在越老的系统上打，能跑的目标机越多**。
-不想专门找一台老机器，就用容器（在任意装了 Docker 的机器上执行，已实测通过）：
+不想专门找一台老机器，就用容器。关键在于**日志走 stderr、只有 tar 流到 stdout**，
+否则重定向出来的文件里全是日志（这个坑踩过：得到 45MB 的「tar.gz」，`tar` 报
+`not in gzip format`）：
 
 ```bash
 docker run --rm -v "$PWD":/src:ro python:3.13-slim-bullseye bash -c '
   set -e
-  apt-get update -qq && apt-get install -y -qq --no-install-recommends binutils
+  apt-get update -qq >&2 && apt-get install -y -qq --no-install-recommends binutils >&2
   cp -r /src /work && cd /work
-  pip install -r requirements.txt pyinstaller
-  python scripts/build_exe.py --onedir --clean --with-extensions
-  ./dist/datacompare/datacompare --version
-'
-# 产物在容器里，取出来：
-docker cp <容器名>:/work/dist/datacompare ./datacompare-linux-x64
+  pip install -r requirements.txt pyinstaller >&2
+  python scripts/build_exe.py --onedir --clean --with-extensions >&2
+  ./dist/datacompare/datacompare --version >&2
+  tar -C /work/dist -czf - datacompare
+' > datacompare-linux-x64.tar.gz
+
+tar -tzf datacompare-linux-x64.tar.gz | head    # 应该看到 datacompare/...
 ```
 
 | 打包方式 | 产物要求的最低 glibc | 能跑在 |
@@ -419,6 +423,9 @@ DuckDB 扩展的版本号要对得上）。
 ```bash
 ldd --version | head -1
 ```
+
+打**免安装可执行文件**时同样的道理（而且更严格：产物直接绑定打包机的 glibc），
+见「四、方案 B」里的 glibc 对照表。
 
 ---
 

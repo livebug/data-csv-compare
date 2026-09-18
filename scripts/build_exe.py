@@ -21,6 +21,10 @@ Linux 上只能出 Linux 可执行文件，Windows 上只能出 .exe。
 * DuckDB 的 ``excel`` / ``json`` 扩展**不会**被打进包里（它们是运行时下载的）。
   离线环境请用 ``--with-extensions`` 参数把扩展一并放到 exe 旁边的
   ``duckdb_extensions/`` 目录下，详见 docs/DEPLOY.md。
+* Linux 上需要 ``binutils``（PyInstaller 要调 objdump），否则报
+  ``On Linux, objdump is required``。
+* 产物会绑定**打包机**的 glibc 版本：要在老一点的 Linux 上跑，就在老系统/老容器里打。
+  已验证的容器命令（Debian 11 / glibc 2.31）见 docs/DEPLOY.md「Linux 整体包」一节。
 """
 
 from __future__ import annotations
